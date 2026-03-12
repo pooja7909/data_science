@@ -158,10 +158,12 @@ export default function App() {
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const isFetching = React.useRef(false);
 
   // Fetch data on mount
   useEffect(() => {
     const fetchData = async () => {
+      isFetching.current = true;
       try {
         console.log("Fetching data from Firebase...");
         const [students, assessments, marks, groups] = await Promise.all([
@@ -170,16 +172,17 @@ export default function App() {
           getMarks(),
           getGroups()
         ]);
-        console.log("Data fetched:", { students: students.length, assessments: assessments.length, marks: marks.length, groups: groups.length });
-        setStudents(students);
-        setAssessments(assessments);
-        setMarks(marks);
-        setGroups(groups);
+        console.log("Data fetched:", { students, assessments, marks, groups });
+        setStudents(students || []);
+        setAssessments(assessments || []);
+        setMarks(marks || []);
+        setGroups(groups || []);
         setHasLoaded(true);
       } catch (error) {
         console.error("Failed to fetch data:", error);
       } finally {
         setIsInitialLoading(false);
+        isFetching.current = false;
       }
     };
     fetchData();
@@ -187,7 +190,7 @@ export default function App() {
 
   // Save data when state changes
   useEffect(() => {
-    if (!hasLoaded) return;
+    if (!hasLoaded || isFetching.current) return;
 
     const saveData = async () => {
       console.log("Saving data to Firebase...");
