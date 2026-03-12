@@ -150,21 +150,7 @@ async function startServer() {
       res.status(500).json({ error: "Failed to save data" });
     }
   });
-  app.post("/api/login", async (req, res) => {
-  const { password } = req.body;
-  const storedHash = process.env.HASHED_PASSWORD; // You will set this in Vercel
-
-  if (!storedHash) {
-    return res.status(500).json({ error: "Password not configured" });
-  }
-
-  const isMatch = await bcrypt.compare(password, storedHash);
-  if (isMatch) {
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ success: false, error: "Invalid password" });
-  }
-});
+  
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
