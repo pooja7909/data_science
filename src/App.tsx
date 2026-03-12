@@ -1813,6 +1813,7 @@ export default function App() {
                     className="btn-primary w-full flex items-center justify-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
+                    {/* Test comment */}
                     Add Student
                   </button>
                   <label className="btn-secondary w-full flex items-center justify-center gap-2 cursor-pointer">
@@ -1884,6 +1885,19 @@ export default function App() {
                                           {p.averagePercentage.toFixed(0)}%
                                         </span>
                                         {getTrendIcon(p.trend)}
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (confirm('Are you sure you want to delete this student?')) {
+                                              setStudents(prev => prev.filter(s => s.id !== p.student.id));
+                                              setPerformances(prev => prev.filter(perf => perf.student.id !== p.student.id));
+                                              setMarks(prev => prev.filter(m => m.studentId !== p.student.id));
+                                            }
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
                                       </div>
                                     </button>
                                   ))}
