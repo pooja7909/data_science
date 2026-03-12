@@ -589,6 +589,48 @@ export default function App() {
     console.log("Paper upload functionality disabled.");
   };
 
+  const handleBulkStudentImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    
+    const processData = (data: any[]) => {
+      const newStudents: Student[] = data.map(row => ({
+        id: Math.random().toString(36).substr(2, 9),
+        name: row.name || row.studentName || '',
+        yearGroup: (row.yearGroup || row.year || 7) as YearGroup,
+        groupName: row.groupName || row.group || '',
+        academicYear: selectedAcademicYear
+      })).filter(s => s.name !== '');
+
+      setStudents(prev => [...prev, ...newStudents]);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+      e.target.value = '';
+    };
+
+    if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const data = evt.target?.result;
+        const wb = XLSX.read(data, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(ws);
+        processData(jsonData);
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          processData(results.data);
+        }
+      });
+    }
+  };
+
   const updateQuestionScore = (studentId: string, assessmentId: string, questionNumber: string, score: number) => {
     setMarks(prev => {
       const existingMark = prev.find(m => m.studentId === studentId && m.assessmentId === assessmentId);
@@ -1744,6 +1786,11 @@ export default function App() {
                     <Plus className="w-4 h-4" />
                     Add Student
                   </button>
+                  <label className="btn-secondary w-full flex items-center justify-center gap-2 cursor-pointer">
+                    <Upload className="w-4 h-4" />
+                    Bulk Import
+                    <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleBulkStudentImport} />
+                  </label>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input 
