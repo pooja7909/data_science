@@ -2550,13 +2550,11 @@ export default function App() {
                       Custom boundaries for this assessment. If not set, class defaults will be used.
                     </p>
                     <div className="space-y-3">
-                      {(assessments.find(a => a.id === showMarksModal)?.boundaries || yearBoundaries[students.find(s => marks.find(m => m.assessmentId === showMarksModal)?.studentId === s.id)?.yearGroup || 7] || [])
+                      {(assessments.find(a => a.id === showMarksModal)?.boundaries || yearBoundaries[assessments.find(a => a.id === showMarksModal)?.yearGroup || 7] || [])
                         .sort((a, b) => b.minPercentage - a.minPercentage)
                         .map((boundary, idx) => {
                           const assessment = assessments.find(a => a.id === showMarksModal)!;
-                          const studentId = marks.find(m => m.assessmentId === showMarksModal)?.studentId;
-                          const yearGroup = students.find(s => s.id === studentId)?.yearGroup || 7;
-                          const sourceBoundaries = assessment.boundaries || yearBoundaries[yearGroup] || [];
+                          const sourceBoundaries = assessment.boundaries || yearBoundaries[assessment.yearGroup] || [];
                           const originalIdx = sourceBoundaries.indexOf(boundary);
 
                           return (
