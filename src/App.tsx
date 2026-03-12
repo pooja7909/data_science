@@ -109,7 +109,11 @@ const INITIAL_ASSESSMENTS: Assessment[] = [];
 
 const INITIAL_MARKS: Mark[] = [];
 
-const ACADEMIC_YEARS = ['2023-24', '2024-25', '2025-26', '2026-27', '2027-28'];
+const ACADEMIC_YEARS = Array.from({ length: 2035 - 2023 + 1 }, (_, i) => {
+  const startYear = 2023 + i;
+  const endYear = (startYear + 1) % 100;
+  return `${startYear}-${endYear.toString().padStart(2, '0')}`;
+});
 const CURRENT_ACADEMIC_YEAR = '2025-26';
 
 export default function App() {
