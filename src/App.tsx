@@ -595,25 +595,24 @@ export default function App() {
 
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
     
-    const processData = (data: any[][]) => {
+    const processData = (data: any[][], sheetName?: string) => {
       // Find header row index (row containing 'Surname')
       const headerIndex = data.findIndex(row => 
         row.some(cell => typeof cell === 'string' && cell.toLowerCase().includes('surname'))
       );
       
       if (headerIndex === -1) {
-        alert("Could not find header row containing 'Surname'. Please check your file format.");
-        return;
+        return []; // No valid data in this sheet
       }
 
       const headers = data[headerIndex];
       const dataRows = data.slice(headerIndex + 1);
       
-      // Try to guess group name from first row
-      let guessedGroup = '';
-      if (data[0] && typeof data[0][0] === 'string') {
+      // Try to guess group name from sheet name or first row
+      let guessedGroup = sheetName || '';
+      if (!guessedGroup && data[0] && typeof data[0][0] === 'string') {
         const firstCell = data[0][0];
-        const match = firstCell.match(/^([^\s-]+)/); // Extract "7/Sc-W"
+        const match = firstCell.match(/^([^\s-]+)/);
         if (match) guessedGroup = match[0];
       }
 
@@ -622,18 +621,13 @@ export default function App() {
       const forenameIdx = headers.findIndex(h => typeof h === 'string' && h.toLowerCase().includes('forename'));
       const yearIdx = headers.findIndex(h => typeof h === 'string' && h.toLowerCase().includes('year'));
       
-      const newStudents: Student[] = dataRows.map(row => ({
+      return dataRows.map(row => ({
         id: Math.random().toString(36).substr(2, 9),
         name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
         yearGroup: (row[yearIdx] || 7) as YearGroup,
         groupName: guessedGroup || '',
         academicYear: selectedAcademicYear
       })).filter(s => s.name !== '' && s.name !== ' ');
-
-      setStudents(prev => [...prev, ...newStudents]);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 3000);
-      e.target.value = '';
     };
 
     if (fileExtension === 'xlsx' || fileExtension === 'xls') {
@@ -641,9 +635,18 @@ export default function App() {
       reader.onload = (evt) => {
         const data = evt.target?.result;
         const wb = XLSX.read(data, { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-        processData(jsonData);
+        
+        const allStudents: Student[] = [];
+        wb.SheetNames.forEach(wsname => {
+          const ws = wb.Sheets[wsname];
+          const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+          allStudents.push(...processData(jsonData, wsname));
+        });
+
+        setStudents(prev => [...prev, ...allStudents]);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+        e.target.value = '';
       };
       reader.readAsArrayBuffer(file);
     } else {
