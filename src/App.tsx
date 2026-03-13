@@ -2855,10 +2855,10 @@ export default function App() {
                                     </div>
                                   </div>
                                   {isGroupExpanded && groupStudents.map((p) => (
-                                    <button
+                                    <div
                                       key={p.student.id}
                                       onClick={() => setSelectedStudentId(p.student.id)}
-                                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
+                                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between group cursor-pointer ${
                                         selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
                                       }`}
                                     >
@@ -2884,17 +2884,19 @@ export default function App() {
                                           {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
                                         </span>
                                         {getTrendIcon(p.trend)}
-                                        <button 
+                                        <div
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleDeleteStudent(p.student.id);
                                           }}
-                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
+                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity cursor-pointer"
+                                          role="button"
+                                          title="Delete student"
                                         >
                                           <Trash2 className="w-3 h-3" />
-                                        </button>
+                                        </div>
                                       </div>
-                                    </button>
+                                    </div>
                                   ))}
                                 </div>
                               );
