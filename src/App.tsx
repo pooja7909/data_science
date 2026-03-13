@@ -213,6 +213,15 @@ export default function App() {
     if (!showMarksModal) setMarksGroupFilter('all');
   }, [showMarksModal]);
 
+  // Auto-run preview when import modal opens so Import button is immediately available
+  useEffect(() => {
+    if (showImportModal && pendingImport) {
+      // Small delay to let importConfig state settle before running preview
+      const t = setTimeout(() => previewImport(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [showImportModal]);
+
   useEffect(() => {
     if (!showPaperGradingModal) setModalGroupFilter('all');
   }, [showPaperGradingModal]);
@@ -4383,8 +4392,8 @@ export default function App() {
                   className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                   disabled={
                     !importPreview ||
-                    Object.keys(importColumnSubjects).length === 0 ||
-                    Object.values(importColumnSubjects).some(s => !s)
+                    (Object.keys(importColumnSubjects).length > 0 &&
+                     Object.values(importColumnSubjects).some(s => !s))
                   }
                 >
                   Import
