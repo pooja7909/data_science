@@ -373,7 +373,11 @@ export default function App() {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
-      const hasMarksInSubject = performanceSubjectFilter === 'all' || p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
+      // Subject filter: show students if they have marks in the subject OR if no subject filter applied
+      // Students without marks in a subject still show (subject filter primarily affects performance detail)
+      const hasMarksInSubject = performanceSubjectFilter === 'all' || 
+        p.marks.some(m => m.assessment.subject === performanceSubjectFilter) ||
+        p.marks.length === 0; // Students with no marks always show in sidebar
       return matchesSearch && matchesYear && matchesGroup && hasMarksInSubject;
     });
   }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter]);
@@ -381,11 +385,12 @@ export default function App() {
   const availableGroups = useMemo(() => {
     const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
     const filteredByYear = currentYearStudents.filter(s => matchesYearFilter(s.yearGroup, yearFilter));
-    const existingGroupNames = new Set(groups.map(g => g.name));
-    return Array.from(new Set(filteredByYear.map(s => s.groupName)))
-      .filter(Boolean)
-      .filter(name => existingGroupNames.has(name))
-      .sort();
+    // Include groups from both the groups collection AND from students directly (handles bulk imports)
+    const groupsFromStudents = Array.from(new Set(filteredByYear.map(s => s.groupName))).filter(Boolean);
+    const groupsFromCollection = groups
+      .filter(g => matchesYearFilter(g.yearGroup, yearFilter) && g.academicYear === selectedAcademicYear)
+      .map(g => g.name);
+    return Array.from(new Set([...groupsFromStudents, ...groupsFromCollection])).sort();
   }, [students, selectedAcademicYear, yearFilter, groups]);
 
   const topPerformers = useMemo(() => {
@@ -850,6 +855,29 @@ export default function App() {
 
       if (toAdd.length > 0) {
         setStudents(prev => [...prev, ...toAdd]);
+        
+        // Auto-create group entries for any new groups discovered
+        const newGroupEntries: Group[] = [];
+        const groupKeys = new Set(groups.map(g => `${String(g.yearGroup)}|${g.name}|${g.academicYear}`));
+        
+        toAdd.forEach(s => {
+          if (!s.groupName) return;
+          const key = `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`;
+          if (!groupKeys.has(key)) {
+            newGroupEntries.push({
+              id: Math.random().toString(36).substr(2, 9),
+              yearGroup: s.yearGroup,
+              name: s.groupName,
+              academicYear: s.academicYear
+            });
+            groupKeys.add(key);
+          }
+        });
+        
+        if (newGroupEntries.length > 0) {
+          setGroups(prev => [...prev, ...newGroupEntries]);
+        }
+        
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 3000);
       }
@@ -2885,15 +2913,25 @@ export default function App() {
                         onChange={(e) => setMarksGroupFilter(e.target.value)}
                       >
                         <option value="all">All Groups</option>
-                        {groups
-                          .filter(g => {
-                            const assessment = assessments.find(a => a.id === showMarksModal);
-                            return assessment ? (g.yearGroup === assessment.yearGroup && g.academicYear === selectedAcademicYear) : g.academicYear === selectedAcademicYear;
-                          })
-                          .map(g => (
-                            <option key={g.id} value={g.name}>{g.name}</option>
-                          ))
-                        }
+                        {(() => {
+                          const assessment = assessments.find(a => a.id === showMarksModal);
+                          const fromCollection = groups.filter(g => 
+                            assessment 
+                              ? (String(g.yearGroup) === String(assessment.yearGroup) && g.academicYear === selectedAcademicYear) 
+                              : g.academicYear === selectedAcademicYear
+                          ).map(g => g.name);
+                          // Also include groups from students directly (handles bulk-imported students)
+                          const fromStudents = students
+                            .filter(s => assessment 
+                              ? (String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === selectedAcademicYear)
+                              : s.academicYear === selectedAcademicYear)
+                            .map(s => s.groupName)
+                            .filter(Boolean);
+                          const allGroups = Array.from(new Set([...fromCollection, ...fromStudents])).sort();
+                          return allGroups.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ));
+                        })()}
                       </select>
                     </div>
                   </div>
@@ -2902,8 +2940,9 @@ export default function App() {
                       const assessment = assessments.find(a => a.id === showMarksModal);
                       const relevantStudents = students.filter(s => {
                         const matchesYear = assessment ? String(s.yearGroup) === String(assessment.yearGroup) : true;
+                        const matchesAcademicYear = s.academicYear === selectedAcademicYear;
                         const matchesGroup = marksGroupFilter === 'all' || s.groupName === marksGroupFilter;
-                        return matchesYear && matchesGroup;
+                        return matchesYear && matchesAcademicYear && matchesGroup;
                       });
                       const groupNames = Array.from(new Set(relevantStudents.map(s => s.groupName))).sort();
 
