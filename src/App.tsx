@@ -331,7 +331,7 @@ export default function App() {
           ...m,
           assessment: currentYearAssessments.find(a => a.id === m.assessmentId)!
         }))
-        .filter(m => m.assessment && (performanceSubjectFilter === 'all' || m.assessment.subject === performanceSubjectFilter))
+        .filter(m => m.assessment)
         .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
       const totalPercentage = studentMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
@@ -2091,7 +2091,7 @@ export default function App() {
                       .map(year => {
                         const yearStudents = filteredPerformances.filter(p => p.student.yearGroup === year);
                         const definedGroups = groups.filter(g => g.yearGroup === year && g.academicYear === selectedAcademicYear).map(g => g.name);
-                        const studentGroups = Array.from(new Set(yearStudents.map(p => p.student.groupName)));
+                        const studentGroups = Array.from(new Set(yearStudents.map(p => p.student.groupName))).filter(Boolean);
                         const yearGroups = Array.from(new Set([...definedGroups, ...studentGroups])).sort();
                         
                         if (yearGroups.length === 0 && yearStudents.length === 0) return null;
@@ -2217,7 +2217,7 @@ export default function App() {
 
                           <div className="h-[250px] mb-8">
                             <ResponsiveContainer width="100%" height="100%">
-                              <AreaChart data={p.marks.map(m => ({
+                              <AreaChart data={(performanceSubjectFilter === 'all' ? p.marks : p.marks.filter(m => m.assessment.subject === performanceSubjectFilter)).map(m => ({
                                 name: m.assessment.name,
                                 score: (m.score / m.assessment.maxMarks) * 100
                               }))}>
@@ -2250,7 +2250,7 @@ export default function App() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-50">
-                                {p.marks.map((m, idx) => {
+                                {(performanceSubjectFilter === 'all' ? p.marks : p.marks.filter(m => m.assessment.subject === performanceSubjectFilter)).map((m, idx) => {
                                   const percentage = (m.score / m.assessment.maxMarks) * 100;
                                   const currentBoundaries = m.assessment.boundaries || yearBoundaries[p.student.yearGroup] || [];
                                   const grade = getGrade(percentage, currentBoundaries);
