@@ -143,6 +143,7 @@ export default function App() {
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [showMarksModal, setShowMarksModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importPreview, setImportPreview] = useState<{assessments: string[], students: number, marks: number} | null>(null);
   const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string, sheetName?: string } | null>(null);
   const [importConfig, setImportConfig] = useState({ 
     yearGroup: 7 as YearGroup, 
@@ -1299,6 +1300,7 @@ export default function App() {
           date: new Date().toISOString().split('T')[0]
         });
         
+        setImportPreview(null);
         setShowImportModal(true);
         e.target.value = '';
       };
@@ -1559,7 +1561,14 @@ export default function App() {
             || (subjectsAreMultiple ? defaultSubject : rowSubjectRaw);
           const rowDate = defaultDate;
 
-          let assessment = newAssessments.find(a => a.name.trim().toLowerCase() === rowAssessmentName.trim().toLowerCase() && a.yearGroup === yearGroup && a.subject === rowSubject && a.academicYear === selectedAcademicYear);
+          // Match assessment: name + subject + yearGroup + academicYear
+          // Use String() comparison to handle type mismatches
+          let assessment = newAssessments.find(a => 
+            a.name.trim().toLowerCase() === rowAssessmentName.trim().toLowerCase() && 
+            String(a.yearGroup) === String(yearGroup) && 
+            a.subject === rowSubject && 
+            a.academicYear === selectedAcademicYear
+          );
           if (!assessment) {
             assessment = {
               id: Math.random().toString(36).substr(2, 9),
@@ -1571,11 +1580,18 @@ export default function App() {
               academicYear: selectedAcademicYear
             };
             newAssessments.push(assessment);
+          } else {
+            // Update maxMarks if the header specifies a different value
+            if (rowMaxMarks !== defaultMaxMarks) {
+              assessment.maxMarks = rowMaxMarks;
+            }
           }
 
+          // Update existing mark or add new one; remove absent flag if score provided
           const existingMarkIdx = newMarks.findIndex(m => m.studentId === student!.id && m.assessmentId === assessment!.id);
           if (existingMarkIdx !== -1) {
             newMarks[existingMarkIdx].score = rowScore;
+            delete (newMarks[existingMarkIdx] as any).absent; // clear absent flag if score now provided
           } else {
             newMarks.push({ 
               id: Math.random().toString(36).substr(2, 9),
@@ -1622,10 +1638,100 @@ export default function App() {
     setAssessments(newAssessments);
     setMarks(newMarks);
     
+    const newStudentCount = newStudents.length - students.length;
+    const newAssessmentCount = newAssessments.length - assessments.length;
+    const newMarkCount = newMarks.length - marks.length;
+    
     setShowImportModal(false);
     setPendingImport(null);
+    setImportPreview(null);
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 3000);
+
+    // Show summary alert
+    const parts = [];
+    if (newStudentCount > 0) parts.push(`${newStudentCount} new student${newStudentCount > 1 ? 's' : ''}`);
+    if (newAssessmentCount > 0) parts.push(`${newAssessmentCount} new assessment${newAssessmentCount > 1 ? 's' : ''}`);
+    if (newMarkCount > 0) parts.push(`${newMarkCount} mark${newMarkCount > 1 ? 's' : ''} added/updated`);
+    if (parts.length > 0) {
+      alert('Import complete: ' + parts.join(', ') + '.');
+    } else {
+      alert('Import complete — no new data detected. Check that student names match exactly and column headers include max marks e.g. "Test 1 (50)".');
+    }
+  };
+
+  // Dry-run the import to show a preview of what will be created/updated
+  const previewImport = () => {
+    if (!pendingImport) return;
+    const { data } = pendingImport;
+    const { yearGroup, subject: defaultSubject, maxMarks: defaultMaxMarks } = importConfig;
+
+    const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s_]/g, '');
+    const metadataKeys = [
+      'studentname','name','student','fullname','pupil','pupilname',
+      'surname','lastname','forename','firstname',
+      'yeargroup','year','groupname','group','class',
+      'subject','subjects','level','iblevel','date','maxmarks','assessmentname','score','mark',
+      'upn','uln','gender','dob','sen','pp','fsm','eal','ethnicity','notes','comments',
+      'attendance','email','id','mis_id','__sheetname'
+    ].map(normalizeKey);
+
+    const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
+    const scoreColumns = headers.filter(h => {
+      if (metadataKeys.includes(normalizeKey(h))) return false;
+      return data.some((row: any) => {
+        const v = row[h];
+        return v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()));
+      });
+    });
+
+    // Discover assessments from column headers
+    const assessmentNames: string[] = scoreColumns.map(col => {
+      const marksMatch = col.match(/\((\d+)\)/);
+      let name = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
+      // Strip subject suffix if present
+      const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+      if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
+        name = dashMatch[1].trim();
+      }
+      const maxMarks = marksMatch ? parseInt(marksMatch[1]) : defaultMaxMarks;
+      // Find subject
+      let subject = defaultSubject;
+      if (dashMatch) {
+        const possSubj = dashMatch[2].trim();
+        const matched = allSubjects.find(s => s.toLowerCase() === possSubj.toLowerCase());
+        if (matched) subject = matched;
+      }
+      return \`\${name} (\${subject}, \${maxMarks} marks)\`;
+    });
+
+    const studentNames = new Set<string>();
+    let markCount = 0;
+    data.forEach((row: any) => {
+      let nameRaw = ['studentname','name','student','fullname','pupil','pupilname']
+        .map(k => Object.keys(row).find(rk => normalizeKey(rk) === k))
+        .filter(Boolean).map(k => row[k!])[0];
+      if (!nameRaw) {
+        const surnameKey = Object.keys(row).find(k => normalizeKey(k) === 'surname' || normalizeKey(k) === 'lastname');
+        const forenameKey = Object.keys(row).find(k => normalizeKey(k) === 'forename' || normalizeKey(k) === 'firstname');
+        if (surnameKey || forenameKey) {
+          nameRaw = \`\${row[forenameKey||'']||''} \${row[surnameKey||'']||''}\`.trim();
+        }
+      }
+      if (!nameRaw) return;
+      studentNames.add(String(nameRaw).trim());
+      scoreColumns.forEach(col => {
+        const v = row[col];
+        if (v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()))) markCount++;
+      });
+    });
+
+    setImportPreview({
+      assessments: assessmentNames,
+      students: studentNames.size,
+      marks: markCount
+    });
   };
 
   const handleAddAssessment = (e: React.FormEvent) => {
@@ -2854,8 +2960,12 @@ export default function App() {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => handleDeleteAssessment(assessment.id)}
-                          className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
+                          onClick={() => {
+                            if (window.confirm(`Delete "${assessment.name}"? This will also remove all ${marks.filter(m => m.assessmentId === assessment.id).length} marks for this assessment. This cannot be undone.`)) {
+                              handleDeleteAssessment(assessment.id);
+                            }
+                          }}
+                          className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
                           title="Delete Assessment"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -4020,21 +4130,59 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex gap-3 mt-8">
+              {/* Preview panel */}
+              {importPreview && (
+                <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl space-y-3">
+                  <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide">Import Preview</p>
+                  <div className="grid grid-cols-2 gap-3 text-center">
+                    <div className="bg-white rounded-lg p-2 border border-indigo-100">
+                      <p className="text-lg font-bold text-indigo-600">{importPreview.students}</p>
+                      <p className="text-[10px] text-slate-500">Students</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-2 border border-indigo-100">
+                      <p className="text-lg font-bold text-indigo-600">{importPreview.marks}</p>
+                      <p className="text-[10px] text-slate-500">Marks</p>
+                    </div>
+                  </div>
+                  {importPreview.assessments.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-500 mb-1.5">Assessments detected:</p>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {importPreview.assessments.map((a, i) => (
+                          <div key={i} className="text-[11px] text-indigo-700 bg-white px-2 py-1 rounded border border-indigo-100 font-medium">
+                            ✓ {a}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {importPreview.assessments.length === 0 && (
+                    <div className="text-[11px] text-amber-600 bg-amber-50 px-3 py-2 rounded-lg border border-amber-100">
+                      ⚠ No assessment columns detected. Check your column headers include max marks e.g. "Test 1 (50)" or "Paper 1 - Physics (80)".
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3 mt-6">
                 <button 
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setPendingImport(null);
-                  }}
+                  onClick={() => { setShowImportModal(false); setPendingImport(null); setImportPreview(null); }}
                   className="btn-secondary flex-1"
                 >
                   Cancel
                 </button>
                 <button 
-                  onClick={confirmImport}
-                  className="btn-primary flex-1"
+                  onClick={previewImport}
+                  className="btn-secondary flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
                 >
-                  Import {pendingImport?.data.length} Rows
+                  Preview
+                </button>
+                <button 
+                  onClick={() => { confirmImport(); setImportPreview(null); }}
+                  className="btn-primary flex-1"
+                  disabled={importPreview?.assessments.length === 0}
+                >
+                  Import
                 </button>
               </div>
             </motion.div>
