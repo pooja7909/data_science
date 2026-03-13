@@ -411,37 +411,45 @@ export default function App() {
         .filter(m => m.assessment)
         .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
-      const totalPercentage = studentMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
-      const averagePercentage = studentMarks.length > 0 ? totalPercentage / studentMarks.length : 0;
+      // Only include marks where the student actually sat the assessment (not absent)
+      const sittingMarks = studentMarks.filter(m => !(m as any).absent);
+      const absentCount = studentMarks.length - sittingMarks.length;
 
-      // Trend calculation
+      const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
+      // averagePercentage is only over assessments the student actually sat
+      // Returns null if no data at all (new student or all absent) — null propagates through UI as "No data"
+      const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : null;
+
+      // Trend: only from assessments the student sat, need at least 2
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
-      if (studentMarks.length >= 2) {
-        const last = (studentMarks[studentMarks.length - 1].score / studentMarks[studentMarks.length - 1].assessment.maxMarks) * 100;
-        const prev = (studentMarks[studentMarks.length - 2].score / studentMarks[studentMarks.length - 2].assessment.maxMarks) * 100;
+      if (sittingMarks.length >= 2) {
+        const last = (sittingMarks[sittingMarks.length - 1].score / sittingMarks[sittingMarks.length - 1].assessment.maxMarks) * 100;
+        const prev = (sittingMarks[sittingMarks.length - 2].score / sittingMarks[sittingMarks.length - 2].assessment.maxMarks) * 100;
         if (last > prev + 2) trend = 'improving';
         else if (last < prev - 2) trend = 'declining';
       }
 
-      // Status calculation
-      let status: 'excellent' | 'on-track' | 'needs-improvement' = 'on-track';
-      const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
-      
-      const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
-      const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
-      const bottomBoundary = sortedBoundaries[sortedBoundaries.length - 1]?.minPercentage || 0;
-      const warningBoundary = sortedBoundaries.length > 1 ? sortedBoundaries[sortedBoundaries.length - 2].minPercentage : 40;
-      
-      if (averagePercentage >= topBoundary) status = 'excellent';
-      else if (averagePercentage < warningBoundary) status = 'needs-improvement';
+      // Status: only meaningful if student has sat at least 1 assessment
+      let status: 'excellent' | 'on-track' | 'needs-improvement' | 'no-data' = averagePercentage === null ? 'no-data' : 'on-track';
+      if (averagePercentage !== null) {
+        const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
+        const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
+        const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
+        const warningBoundary = sortedBoundaries.length > 1 ? sortedBoundaries[sortedBoundaries.length - 2].minPercentage : 40;
+        if (averagePercentage >= topBoundary) status = 'excellent';
+        else if (averagePercentage < warningBoundary) status = 'needs-improvement';
+      }
 
       return {
         student,
-        marks: studentMarks,
-        averagePercentage,
+        marks: studentMarks,       // all marks including absent (for display)
+        sittingMarks,              // marks where student actually sat (for calculations)
+        absentCount,
+        averagePercentage: averagePercentage ?? 0, // 0 for type compat, use status==='no-data' to distinguish
+        hasData: averagePercentage !== null,
         trend,
         status
-      } as StudentPerformance;
+      } as any as StudentPerformance;
     });
   }, [students, assessments, marks, selectedAcademicYear, yearBoundaries, performanceSubjectFilter]);
 
@@ -473,14 +481,14 @@ export default function App() {
 
   const topPerformers = useMemo(() => {
     return [...filteredPerformances]
-      .filter(p => p.marks.length > 0)
+      .filter(p => (p as any).hasData) // only students who have actually sat at least one assessment
       .sort((a, b) => b.averagePercentage - a.averagePercentage)
       .slice(0, 5);
   }, [filteredPerformances]);
 
   const needsSupport = useMemo(() => {
     return [...filteredPerformances]
-      .filter(p => p.marks.length > 0)
+      .filter(p => (p as any).hasData)
       .sort((a, b) => a.averagePercentage - b.averagePercentage)
       .slice(0, 5);
   }, [filteredPerformances]);
@@ -490,7 +498,7 @@ export default function App() {
     const currentYearAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
 
     return currentYearStudents.map(student => {
-      const studentMarks = marks
+      const allStudentMarks = marks
         .filter(m => m.studentId === student.id)
         .map(m => ({
           ...m,
@@ -500,15 +508,19 @@ export default function App() {
         .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
         .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
-      const totalPercentage = studentMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
-      const averagePercentage = studentMarks.length > 0 ? totalPercentage / studentMarks.length : 0;
+      // Exclude absent marks from average — only count assessments actually sat
+      const sittingMarks = allStudentMarks.filter(m => !(m as any).absent);
+      const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
+      const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : 0;
 
       return {
         student,
         averagePercentage,
-        count: studentMarks.length
+        count: sittingMarks.length,         // only assessments actually sat
+        totalCount: allStudentMarks.length,  // includes absent
+        absentCount: allStudentMarks.length - sittingMarks.length
       };
-    }).filter(p => p.count > 0);
+    }).filter(p => p.count > 0); // exclude students with no real marks at all
   }, [students, assessments, marks, performanceSubjectFilter, yearFilter, selectedAcademicYear]);
 
   const topPerformersList = useMemo(() => {
@@ -526,15 +538,18 @@ export default function App() {
   const performanceInsights = useMemo(() => {
     if (performanceTabStats.length === 0) return null;
 
+    // performanceTabStats already filters to students with count > 0, so all have real data
     const avg = performanceTabStats.reduce((acc, p) => acc + p.averagePercentage, 0) / performanceTabStats.length;
     
     // Find most improved student from filtered set
     const studentTrends = performances
       .filter(p => performanceTabStats.some(ps => ps.student.id === p.student.id))
       .map(p => {
-        if (p.marks.length < 2) return { id: p.student.id, improvement: 0 };
-        const last = (p.marks[p.marks.length - 1].score / p.marks[p.marks.length - 1].assessment.maxMarks) * 100;
-        const first = (p.marks[0].score / p.marks[0].assessment.maxMarks) * 100;
+        // Use only marks where student actually sat the exam (not absent)
+        const sitting = ((p as any).sittingMarks || p.marks.filter((m: any) => !m.absent));
+        if (sitting.length < 2) return { id: p.student.id, improvement: 0 };
+        const last = (sitting[sitting.length - 1].score / sitting[sitting.length - 1].assessment.maxMarks) * 100;
+        const first = (sitting[0].score / sitting[0].assessment.maxMarks) * 100;
         return { id: p.student.id, name: p.student.name, improvement: last - first };
       })
       .sort((a, b) => b.improvement - a.improvement);
@@ -588,7 +603,8 @@ export default function App() {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     return relevantAssessments.map(assessment => {
-      const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
+      // Only include marks where student actually sat the exam (not absent)
+      const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id && !(m as any).absent);
       const avg = assessmentMarks.length > 0
         ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / assessmentMarks.length
         : 0;
@@ -602,7 +618,9 @@ export default function App() {
   }, [assessments, marks, yearFilter]);
 
   const groupPerformanceData = useMemo(() => {
-    const relevantPerformances = performances.filter(p => matchesYearFilter(p.student.yearGroup, yearFilter));
+    const relevantPerformances = performances.filter(p => 
+      matchesYearFilter(p.student.yearGroup, yearFilter) && (p as any).hasData
+    );
     const groupMap: Record<string, { total: number, count: number }> = {};
     
     relevantPerformances.forEach(p => {
@@ -626,7 +644,7 @@ export default function App() {
     return subjects.map(subject => {
       const subjectMarks = marks.filter(m => {
         const a = currentYearAssessments.find(as => as.id === m.assessmentId);
-        return a?.subject === subject;
+        return a?.subject === subject && !(m as any).absent;
       });
       const avg = subjectMarks.length > 0
         ? subjectMarks.reduce((acc, m) => {
@@ -647,7 +665,9 @@ export default function App() {
     return yearGroups
       .filter(y => matchesYearFilter(y, yearFilter))
       .map(year => {
-      const yearPerformances = performances.filter(p => p.student.yearGroup === year);
+      const yearPerformances = performances.filter(p => 
+        p.student.yearGroup === year && (p as any).hasData
+      );
       const avg = yearPerformances.length > 0 
         ? yearPerformances.reduce((acc, p) => acc + p.averagePercentage, 0) / yearPerformances.length 
         : 0;
@@ -1640,6 +1660,27 @@ export default function App() {
     }
   };
 
+  const handleMarkAbsent = (studentId: string, assessmentId: string, absent: boolean) => {
+    setMarks(prev => {
+      const existingIdx = prev.findIndex(m => m.studentId === studentId && m.assessmentId === assessmentId);
+      if (absent) {
+        // Create/update mark as absent (score stored as 0 but excluded from averages)
+        if (existingIdx !== -1) {
+          return prev.map((m, i) => i === existingIdx ? { ...m, absent: true, score: 0 } : m);
+        }
+        return [...prev, { id: Math.random().toString(36).substr(2, 9), studentId, assessmentId, score: 0, absent: true } as any];
+      } else {
+        // Remove absent flag — mark becomes "not yet entered" if score was 0
+        if (existingIdx !== -1) {
+          const updated = { ...prev[existingIdx] };
+          delete (updated as any).absent;
+          return prev.map((m, i) => i === existingIdx ? updated : m);
+        }
+        return prev;
+      }
+    });
+  };
+
   const handleUpdateMark = (studentId: string, assessmentId: string, score: number) => {
     const assessment = assessments.find(a => a.id === assessmentId);
     const maxMarks = assessment?.maxMarks || 100;
@@ -1668,6 +1709,7 @@ export default function App() {
       case 'excellent': return 'text-emerald-600 bg-emerald-50 border-emerald-100';
       case 'on-track': return 'text-blue-600 bg-blue-50 border-blue-100';
       case 'needs-improvement': return 'text-rose-600 bg-rose-50 border-rose-100';
+      case 'no-data': return 'text-slate-400 bg-slate-50 border-slate-100';
       default: return 'text-slate-600 bg-slate-50 border-slate-100';
     }
   };
@@ -1860,7 +1902,12 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-3xl font-bold text-slate-900 leading-none mb-1">
-                      {(filteredPerformances.reduce((acc, p) => acc + p.averagePercentage, 0) / (filteredPerformances.length || 1)).toFixed(1)}%
+                      {(() => {
+                        const withData = filteredPerformances.filter(p => (p as any).hasData);
+                        return withData.length > 0
+                          ? `${(withData.reduce((acc, p) => acc + p.averagePercentage, 0) / withData.length).toFixed(1)}%`
+                          : '—';
+                      })()}
                     </h2>
                     <p className="text-[10px] text-slate-500 font-medium">
                       {yearFilter === 'all' ? 'School-wide average' 
@@ -2007,6 +2054,7 @@ export default function App() {
                       { label: 'Excellent (80%+)', count: filteredPerformances.filter(p => p.status === 'excellent').length, color: 'bg-emerald-500' },
                       { label: 'On Track (50-80%)', count: filteredPerformances.filter(p => p.status === 'on-track').length, color: 'bg-blue-500' },
                       { label: 'Needs Improvement (<50%)', count: filteredPerformances.filter(p => p.status === 'needs-improvement').length, color: 'bg-rose-500' },
+                      { label: 'New / No Data', count: filteredPerformances.filter(p => (p as any).status === 'no-data').length, color: 'bg-slate-300' },
                     ].map((item) => (
                       <div key={item.label}>
                         <div className="flex justify-between text-sm mb-2">
@@ -2135,7 +2183,7 @@ export default function App() {
                             </div>
                           </div>
                           <span className="text-xs font-bold text-emerald-600 bg-white px-2 py-0.5 rounded-full border border-emerald-100">
-                            {p.averagePercentage.toFixed(1)}%
+                            {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
                           </span>
                         </button>
                       )) : (
@@ -2166,7 +2214,7 @@ export default function App() {
                             </div>
                           </div>
                           <span className="text-xs font-bold text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-100">
-                            {p.averagePercentage.toFixed(1)}%
+                            {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
                           </span>
                         </button>
                       )) : (
@@ -2186,6 +2234,7 @@ export default function App() {
                         { label: 'B/C', count: performanceTabStats.filter(p => p.averagePercentage >= 60 && p.averagePercentage < 80).length, color: 'bg-blue-500' },
                         { label: 'D/E', count: performanceTabStats.filter(p => p.averagePercentage >= 40 && p.averagePercentage < 60).length, color: 'bg-amber-500' },
                         { label: 'U', count: performanceTabStats.filter(p => p.averagePercentage < 40).length, color: 'bg-rose-500' },
+                        { label: 'No data', count: students.filter(s => s.academicYear === selectedAcademicYear && !performanceTabStats.find(p => p.student.id === s.id)).length, color: 'bg-slate-200' },
                       ].map((item) => (
                         <div key={item.label}>
                           <div className="flex justify-between text-[10px] mb-1.5">
@@ -2534,7 +2583,7 @@ export default function App() {
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         <span className={`text-[8px] px-1 py-0.5 rounded-full border font-bold ${getStatusColor(p.status)}`}>
-                                          {p.averagePercentage.toFixed(0)}%
+                                          {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
                                         </span>
                                         {getTrendIcon(p.trend)}
                                         <button 
@@ -2569,7 +2618,16 @@ export default function App() {
                           <div className="flex items-center justify-between mb-8">
                             <div>
                               <h2 className="text-2xl font-bold text-slate-900">{p.student.name}</h2>
-                              <p className="text-slate-500">{formatYearGroup(p.student.yearGroup)} • {p.student.groupName} • Overall Average: {p.averagePercentage.toFixed(1)}%</p>
+                              <p className="text-slate-500">
+                                {formatYearGroup(p.student.yearGroup)} • {p.student.groupName} • {' '}
+                                {(p as any).hasData 
+                                  ? <>Overall Average: <span className="font-bold text-slate-700">{p.averagePercentage.toFixed(1)}%</span></>
+                                  : <span className="text-slate-400 italic">No assessments sat yet</span>
+                                }
+                                {(p as any).absentCount > 0 && (
+                                  <span className="ml-2 text-[11px] text-rose-400">• {(p as any).absentCount} absent</span>
+                                )}
+                              </p>
                               {/* HL/SL subject level badges for IB students */}
                               {(p.student as any).subjectLevels && Object.keys((p.student as any).subjectLevels).length > 0 && (
                                 <div className="flex flex-wrap gap-1.5 mt-2">
@@ -2777,13 +2835,17 @@ export default function App() {
                     </div>
                     
                     {(() => {
-                      const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
+                      const allAssessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
+                      const absentMarks = allAssessmentMarks.filter(m => (m as any).absent);
+                      // Only count students who actually sat the exam (not absent) for avg and marked count
+                      const assessmentMarks = allAssessmentMarks.filter(m => !(m as any).absent);
                       const totalStudents = students.filter(s => String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === assessment.academicYear).length;
                       const markedCount = assessmentMarks.length;
                       const avg = markedCount > 0
                         ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / markedCount
                         : null;
-                      const unmarkedCount = totalStudents - markedCount;
+                      // unmarked = students with no mark record at all (not absent, not entered)
+                      const unmarkedCount = totalStudents - allAssessmentMarks.length;
                       return (
                         <div className="mt-4 pt-4 border-t border-slate-50 space-y-3">
                           <div className="grid grid-cols-3 gap-2 text-center">
@@ -2802,6 +2864,9 @@ export default function App() {
                               <p className={`text-sm font-bold ${unmarkedCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                                 {markedCount}/{totalStudents}
                               </p>
+                              {absentMarks.length > 0 && (
+                                <p className="text-[8px] text-rose-400 font-bold mt-0.5">{absentMarks.length} absent</p>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
@@ -3439,19 +3504,42 @@ export default function App() {
                                       {mark === undefined && (
                                         <span className="text-[8px] font-bold text-amber-500 uppercase tracking-wide">Not marked</span>
                                       )}
+                                      {(mark as any)?.absent && (
+                                        <span className="text-[8px] font-bold text-rose-500 uppercase tracking-wide">Absent — excluded from avg</span>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-1.5">
+                                      {/* Absent toggle */}
+                                      <button
+                                        type="button"
+                                        title={(mark as any)?.absent ? 'Mark as present' : 'Mark as absent'}
+                                        onClick={() => handleMarkAbsent(student.id, showMarksModal, !(mark as any)?.absent)}
+                                        className={`text-[8px] font-bold px-1.5 py-0.5 rounded border transition-all ${
+                                          (mark as any)?.absent
+                                            ? 'bg-rose-500 text-white border-rose-500'
+                                            : 'bg-white text-slate-300 border-slate-200 hover:text-rose-400 hover:border-rose-200'
+                                        }`}
+                                      >
+                                        ABS
+                                      </button>
                                       <input 
                                         type="number" 
                                         placeholder="Score"
-                                        className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'}`}
-                                        value={mark?.score ?? ''}
+                                        disabled={(mark as any)?.absent}
+                                        className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                          (mark as any)?.absent
+                                            ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                                            : mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'
+                                        }`}
+                                        value={(mark as any)?.absent ? '' : (mark?.score ?? '')}
                                         min="0"
                                         max={assessment?.maxMarks || 100}
                                         onChange={e => handleUpdateMark(student.id, showMarksModal, parseFloat(e.target.value) || 0)}
                                       />
-                                      <span className={`text-[9px] font-bold w-7 text-right ${mark === undefined ? 'text-amber-400' : 'text-slate-400'}`}>
-                                        {mark !== undefined ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '—'}
+                                      <span className={`text-[9px] font-bold w-7 text-right ${
+                                        (mark as any)?.absent ? 'text-rose-400' : mark === undefined ? 'text-amber-400' : 'text-slate-400'
+                                      }`}>
+                                        {(mark as any)?.absent ? 'ABS' : mark !== undefined ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '—'}
                                       </span>
                                     </div>
                                   </div>
