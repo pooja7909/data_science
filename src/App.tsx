@@ -1703,7 +1703,7 @@ export default function App() {
         const matched = allSubjects.find(s => s.toLowerCase() === possSubj.toLowerCase());
         if (matched) subject = matched;
       }
-      return \`\${name} (\${subject}, \${maxMarks} marks)\`;
+      return `\${name} (\${subject}, \${maxMarks} marks)`;
     });
 
     const studentNames = new Set<string>();
@@ -1716,7 +1716,7 @@ export default function App() {
         const surnameKey = Object.keys(row).find(k => normalizeKey(k) === 'surname' || normalizeKey(k) === 'lastname');
         const forenameKey = Object.keys(row).find(k => normalizeKey(k) === 'forename' || normalizeKey(k) === 'firstname');
         if (surnameKey || forenameKey) {
-          nameRaw = \`\${row[forenameKey||'']||''} \${row[surnameKey||'']||''}\`.trim();
+          nameRaw = `\${row[forenameKey||'']||''} \${row[surnameKey||'']||''}`.trim();
         }
       }
       if (!nameRaw) return;
