@@ -143,8 +143,6 @@ export default function App() {
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [showMarksModal, setShowMarksModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importPreview, setImportPreview] = useState<{assessments: string[], students: number, marks: number, groups: string[]} | null>(null);
-  const [importColumnSubjects, setImportColumnSubjects] = useState<Record<string, string>>({});
   const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string, sheetName?: string } | null>(null);
   const [importConfig, setImportConfig] = useState({ 
     yearGroup: 7 as YearGroup, 
@@ -168,7 +166,6 @@ export default function App() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const isFetching = React.useRef(false);
-  const isImporting = React.useRef(false); // blocks orphan cleanup during import
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['year-7'])); // Default Year 7 expanded
 
@@ -183,7 +180,7 @@ export default function App() {
 
   useEffect(() => {
     if (groupFilter !== 'all') {
-      // Find which year this group belongs to and auto-expand
+      // Find which year this group belongs to
       const student = students.find(s => s.groupName === groupFilter && s.academicYear === selectedAcademicYear);
       if (student) {
         const yearSectionId = `year-${student.yearGroup}`;
@@ -198,61 +195,14 @@ export default function App() {
     }
   }, [groupFilter, students, selectedAcademicYear]);
 
-  // Auto-expand the selected year section in the sidebar
-  useEffect(() => {
-    if (yearFilter !== 'all' && yearFilter !== 'IGCSE_ALL' && yearFilter !== 'IB_ALL') {
-      setExpandedSections(prev => {
-        const next = new Set(prev);
-        next.add(`year-${yearFilter}`);
-        return next;
-      });
-    }
-  }, [yearFilter]);
-
   // Reset modal filters when modals are closed
   useEffect(() => {
     if (!showMarksModal) setMarksGroupFilter('all');
   }, [showMarksModal]);
 
-  // Auto-run preview when import modal opens so Import button is immediately available
-  useEffect(() => {
-    if (showImportModal && pendingImport) {
-      // Small delay to let importConfig state settle before running preview
-      const t = setTimeout(() => previewImport(), 50);
-      return () => clearTimeout(t);
-    }
-  }, [showImportModal]);
-
   useEffect(() => {
     if (!showPaperGradingModal) setModalGroupFilter('all');
   }, [showPaperGradingModal]);
-
-  // Save immediately on page unload/refresh as safety net
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      // Fire-and-forget saves for any unsaved state
-      students.forEach(s => setDoc(doc(db, 'students', s.id), { ...s, yearGroup: migrateYear(s.yearGroup) }).catch(() => {}));
-      groups.forEach(g => setDoc(doc(db, 'groups', g.id), { ...g, yearGroup: migrateYear(g.yearGroup) }).catch(() => {}));
-      assessments.forEach(a => setDoc(doc(db, 'assessments', a.id), { ...a, yearGroup: migrateYear(a.yearGroup) }).catch(() => {}));
-      marks.forEach(m => setDoc(doc(db, 'marks', m.id), m).catch(() => {}));
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [students, groups, assessments, marks]);
-
-  // #8: Escape key closes any open modal
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (showMarksModal) { setShowMarksModal(null); return; }
-      if (showPaperGradingModal) { setShowPaperGradingModal(null); return; }
-      if (showAssessmentModal) { setShowAssessmentModal(false); setEditingAssessmentId(null); return; }
-      if (showStudentModal) { setShowStudentModal(false); return; }
-      if (showImportModal) { setShowImportModal(false); setPendingImport(null); return; }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showMarksModal, showPaperGradingModal, showAssessmentModal, showStudentModal, showImportModal]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -295,19 +245,10 @@ export default function App() {
       try {
         // Save all students, assessments, marks, groups, and year boundaries to Firebase
         await Promise.all([
-          ...students.map(s => setDoc(doc(db, 'students', s.id), {
-            ...s,
-            yearGroup: migrateYear(s.yearGroup)
-          })),
-          ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), {
-            ...a,
-            yearGroup: migrateYear(a.yearGroup)
-          })),
+          ...students.map(s => setDoc(doc(db, 'students', s.id), s)),
+          ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), a)),
           ...marks.map(m => setDoc(doc(db, 'marks', m.id), m)),
-          ...groups.map(g => setDoc(doc(db, 'groups', g.id), {
-            ...g,
-            yearGroup: migrateYear(g.yearGroup)
-          })),
+          ...groups.map(g => setDoc(doc(db, 'groups', g.id), g)),
           updateYearBoundaries(yearBoundaries)
         ]);
         console.log("Data saved successfully.");
@@ -344,18 +285,6 @@ export default function App() {
     return typeof y === 'number' ? `Year ${y}` : y;
   };
 
-  const migrateYear = (y: any): YearGroup => {
-    if (y === 10 || y === '10') return '10 IGCSE';
-    if (y === 11 || y === '11') return '11 IGCSE';
-    if (y === 12 || y === '12') return '12 IB';
-    if (y === 13 || y === '13') return '13 IB';
-    // Normalise string "7","8","9" back to numbers as per YearGroup type
-    if (y === '7') return 7;
-    if (y === '8') return 8;
-    if (y === '9') return 9;
-    return y as YearGroup;
-  };
-
   // Helper for year group matching
   const matchesYearFilter = (itemYear: YearGroup, filter: YearGroup | 'all' | 'IGCSE_ALL' | 'IB_ALL') => {
     if (filter === 'all') return true;
@@ -371,6 +300,14 @@ export default function App() {
 
   // Data Migration for old year formats
   useEffect(() => {
+    const migrateYear = (y: any): YearGroup => {
+      if (y === 10 || y === '10') return '10 IGCSE';
+      if (y === 11 || y === '11') return '11 IGCSE';
+      if (y === 12 || y === '12') return '12 IB';
+      if (y === 13 || y === '13') return '13 IB';
+      return y as YearGroup;
+    };
+
     const migratedStudents = students.map(s => ({ ...s, yearGroup: migrateYear(s.yearGroup) }));
     if (JSON.stringify(migratedStudents) !== JSON.stringify(students)) {
       setStudents(migratedStudents);
@@ -380,46 +317,7 @@ export default function App() {
     if (JSON.stringify(migratedAssessments) !== JSON.stringify(assessments)) {
       setAssessments(migratedAssessments);
     }
-
-    // Also migrate groups yearGroup field
-    const migratedGroups = groups.map(g => ({ ...g, yearGroup: migrateYear(g.yearGroup) }));
-    if (JSON.stringify(migratedGroups) !== JSON.stringify(groups)) {
-      setGroups(migratedGroups);
-    }
-  }, [students, assessments, groups]);
-
-  // Cleanup orphaned groups (groups with no students) from Firestore and local state
-  // Runs across ALL academic years so old ghost groups get purged regardless of selected year
-  useEffect(() => {
-    if (!hasLoaded || groups.length === 0 || isImporting.current) return;
-    // Normalise yearGroup to string before comparing, to avoid race with migrateYear effect
-    // e.g. numeric 10 and string "10 IGCSE" both normalise consistently
-    const normaliseYG = (y: any): string => {
-      const s = String(y).trim();
-      if (s === '10' || s === '10 IGCSE') return '10 IGCSE';
-      if (s === '11' || s === '11 IGCSE') return '11 IGCSE';
-      if (s === '12' || s === '12 IB') return '12 IB';
-      if (s === '13' || s === '13 IB') return '13 IB';
-      return s;
-    };
-    // Build a key set from ALL students across all years
-    const studentGroupKeys = new Set(
-      students.map(s => `${normaliseYG(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
-    );
-    const orphanedGroups = groups.filter(g => 
-      !studentGroupKeys.has(`${normaliseYG(g.yearGroup)}|${g.name}|${g.academicYear}`)
-    );
-    if (orphanedGroups.length > 0) {
-      console.log(`Cleaning up ${orphanedGroups.length} orphaned group(s):`, orphanedGroups.map(g => g.name));
-      setGroups(prev => prev.filter(g => 
-        studentGroupKeys.has(`${normaliseYG(g.yearGroup)}|${g.name}|${g.academicYear}`)
-      ));
-      // Delete from Firestore permanently
-      orphanedGroups.forEach(g => {
-        deleteDoc(doc(db, 'groups', g.id)).catch(console.error);
-      });
-    }
-  }, [hasLoaded, students, groups]);
+  }, [students, assessments]);
 
   // Derived Data
   const performances = useMemo(() => {
@@ -436,45 +334,37 @@ export default function App() {
         .filter(m => m.assessment)
         .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
-      // Only include marks where the student actually sat the assessment (not absent)
-      const sittingMarks = studentMarks.filter(m => !(m as any).absent);
-      const absentCount = studentMarks.length - sittingMarks.length;
+      const totalPercentage = studentMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
+      const averagePercentage = studentMarks.length > 0 ? totalPercentage / studentMarks.length : 0;
 
-      const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
-      // averagePercentage is only over assessments the student actually sat
-      // Returns null if no data at all (new student or all absent) — null propagates through UI as "No data"
-      const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : null;
-
-      // Trend: only from assessments the student sat, need at least 2
+      // Trend calculation
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
-      if (sittingMarks.length >= 2) {
-        const last = (sittingMarks[sittingMarks.length - 1].score / sittingMarks[sittingMarks.length - 1].assessment.maxMarks) * 100;
-        const prev = (sittingMarks[sittingMarks.length - 2].score / sittingMarks[sittingMarks.length - 2].assessment.maxMarks) * 100;
+      if (studentMarks.length >= 2) {
+        const last = (studentMarks[studentMarks.length - 1].score / studentMarks[studentMarks.length - 1].assessment.maxMarks) * 100;
+        const prev = (studentMarks[studentMarks.length - 2].score / studentMarks[studentMarks.length - 2].assessment.maxMarks) * 100;
         if (last > prev + 2) trend = 'improving';
         else if (last < prev - 2) trend = 'declining';
       }
 
-      // Status: only meaningful if student has sat at least 1 assessment
-      let status: 'excellent' | 'on-track' | 'needs-improvement' | 'no-data' = averagePercentage === null ? 'no-data' : 'on-track';
-      if (averagePercentage !== null) {
-        const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
-        const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
-        const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
-        const warningBoundary = sortedBoundaries.length > 1 ? sortedBoundaries[sortedBoundaries.length - 2].minPercentage : 40;
-        if (averagePercentage >= topBoundary) status = 'excellent';
-        else if (averagePercentage < warningBoundary) status = 'needs-improvement';
-      }
+      // Status calculation
+      let status: 'excellent' | 'on-track' | 'needs-improvement' = 'on-track';
+      const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
+      
+      const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
+      const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
+      const bottomBoundary = sortedBoundaries[sortedBoundaries.length - 1]?.minPercentage || 0;
+      const warningBoundary = sortedBoundaries.length > 1 ? sortedBoundaries[sortedBoundaries.length - 2].minPercentage : 40;
+      
+      if (averagePercentage >= topBoundary) status = 'excellent';
+      else if (averagePercentage < warningBoundary) status = 'needs-improvement';
 
       return {
         student,
-        marks: studentMarks,       // all marks including absent (for display)
-        sittingMarks,              // marks where student actually sat (for calculations)
-        absentCount,
-        averagePercentage: averagePercentage ?? 0, // 0 for type compat, use status==='no-data' to distinguish
-        hasData: averagePercentage !== null,
+        marks: studentMarks,
+        averagePercentage,
         trend,
         status
-      } as any as StudentPerformance;
+      } as StudentPerformance;
     });
   }, [students, assessments, marks, selectedAcademicYear, yearBoundaries, performanceSubjectFilter]);
 
@@ -483,37 +373,31 @@ export default function App() {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
-      // Subject filter logic:
-      // 1. If student has a subjects[] field (from import), use it directly
-      // 2. For Years 7-9, all students take all subjects for their year (Science + CS)
-      // 3. For Years 10-13, check marks if no subjects field set
-      const studentSubjects: string[] = (p.student as any).subjects?.length
-        ? (p.student as any).subjects
-        : SUBJECTS_BY_YEAR[p.student.yearGroup] || [];
-      const matchesSubject = performanceSubjectFilter === 'all' ||
-        studentSubjects.includes(performanceSubjectFilter) ||
-        p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
-      return matchesSearch && matchesYear && matchesGroup && matchesSubject;
+      const hasMarksInSubject = performanceSubjectFilter === 'all' || p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
+      return matchesSearch && matchesYear && matchesGroup && hasMarksInSubject;
     });
   }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter]);
 
   const availableGroups = useMemo(() => {
     const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
     const filteredByYear = currentYearStudents.filter(s => matchesYearFilter(s.yearGroup, yearFilter));
-    // Only show groups that actually have students - prevents ghost/deleted groups from appearing
-    return Array.from(new Set(filteredByYear.map(s => s.groupName))).filter(Boolean).sort();
-  }, [students, selectedAcademicYear, yearFilter]);
+    const existingGroupNames = new Set(groups.map(g => g.name));
+    return Array.from(new Set(filteredByYear.map(s => s.groupName)))
+      .filter(Boolean)
+      .filter(name => existingGroupNames.has(name))
+      .sort();
+  }, [students, selectedAcademicYear, yearFilter, groups]);
 
   const topPerformers = useMemo(() => {
     return [...filteredPerformances]
-      .filter(p => (p as any).hasData) // only students who have actually sat at least one assessment
+      .filter(p => p.marks.length > 0)
       .sort((a, b) => b.averagePercentage - a.averagePercentage)
       .slice(0, 5);
   }, [filteredPerformances]);
 
   const needsSupport = useMemo(() => {
     return [...filteredPerformances]
-      .filter(p => (p as any).hasData)
+      .filter(p => p.marks.length > 0)
       .sort((a, b) => a.averagePercentage - b.averagePercentage)
       .slice(0, 5);
   }, [filteredPerformances]);
@@ -523,7 +407,7 @@ export default function App() {
     const currentYearAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
 
     return currentYearStudents.map(student => {
-      const allStudentMarks = marks
+      const studentMarks = marks
         .filter(m => m.studentId === student.id)
         .map(m => ({
           ...m,
@@ -533,19 +417,15 @@ export default function App() {
         .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
         .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
-      // Exclude absent marks from average — only count assessments actually sat
-      const sittingMarks = allStudentMarks.filter(m => !(m as any).absent);
-      const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
-      const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : 0;
+      const totalPercentage = studentMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
+      const averagePercentage = studentMarks.length > 0 ? totalPercentage / studentMarks.length : 0;
 
       return {
         student,
         averagePercentage,
-        count: sittingMarks.length,         // only assessments actually sat
-        totalCount: allStudentMarks.length,  // includes absent
-        absentCount: allStudentMarks.length - sittingMarks.length
+        count: studentMarks.length
       };
-    }).filter(p => p.count > 0); // exclude students with no real marks at all
+    }).filter(p => p.count > 0);
   }, [students, assessments, marks, performanceSubjectFilter, yearFilter, selectedAcademicYear]);
 
   const topPerformersList = useMemo(() => {
@@ -563,18 +443,15 @@ export default function App() {
   const performanceInsights = useMemo(() => {
     if (performanceTabStats.length === 0) return null;
 
-    // performanceTabStats already filters to students with count > 0, so all have real data
     const avg = performanceTabStats.reduce((acc, p) => acc + p.averagePercentage, 0) / performanceTabStats.length;
     
     // Find most improved student from filtered set
     const studentTrends = performances
       .filter(p => performanceTabStats.some(ps => ps.student.id === p.student.id))
       .map(p => {
-        // Use only marks where student actually sat the exam (not absent)
-        const sitting = ((p as any).sittingMarks || p.marks.filter((m: any) => !m.absent));
-        if (sitting.length < 2) return { id: p.student.id, improvement: 0 };
-        const last = (sitting[sitting.length - 1].score / sitting[sitting.length - 1].assessment.maxMarks) * 100;
-        const first = (sitting[0].score / sitting[0].assessment.maxMarks) * 100;
+        if (p.marks.length < 2) return { id: p.student.id, improvement: 0 };
+        const last = (p.marks[p.marks.length - 1].score / p.marks[p.marks.length - 1].assessment.maxMarks) * 100;
+        const first = (p.marks[0].score / p.marks[0].assessment.maxMarks) * 100;
         return { id: p.student.id, name: p.student.name, improvement: last - first };
       })
       .sort((a, b) => b.improvement - a.improvement);
@@ -628,8 +505,7 @@ export default function App() {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     return relevantAssessments.map(assessment => {
-      // Only include marks where student actually sat the exam (not absent)
-      const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id && !(m as any).absent);
+      const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
       const avg = assessmentMarks.length > 0
         ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / assessmentMarks.length
         : 0;
@@ -643,9 +519,7 @@ export default function App() {
   }, [assessments, marks, yearFilter]);
 
   const groupPerformanceData = useMemo(() => {
-    const relevantPerformances = performances.filter(p => 
-      matchesYearFilter(p.student.yearGroup, yearFilter) && (p as any).hasData
-    );
+    const relevantPerformances = performances.filter(p => matchesYearFilter(p.student.yearGroup, yearFilter));
     const groupMap: Record<string, { total: number, count: number }> = {};
     
     relevantPerformances.forEach(p => {
@@ -669,7 +543,7 @@ export default function App() {
     return subjects.map(subject => {
       const subjectMarks = marks.filter(m => {
         const a = currentYearAssessments.find(as => as.id === m.assessmentId);
-        return a?.subject === subject && !(m as any).absent;
+        return a?.subject === subject;
       });
       const avg = subjectMarks.length > 0
         ? subjectMarks.reduce((acc, m) => {
@@ -690,9 +564,7 @@ export default function App() {
     return yearGroups
       .filter(y => matchesYearFilter(y, yearFilter))
       .map(year => {
-      const yearPerformances = performances.filter(p => 
-        p.student.yearGroup === year && (p as any).hasData
-      );
+      const yearPerformances = performances.filter(p => p.student.yearGroup === year);
       const avg = yearPerformances.length > 0 
         ? yearPerformances.reduce((acc, p) => acc + p.averagePercentage, 0) / yearPerformances.length 
         : 0;
@@ -936,81 +808,27 @@ export default function App() {
         const c = h.toLowerCase();
         return c.includes('group') || c.includes('class');
       });
-      const subjectsIdx = headers.findIndex(h => {
-        if (typeof h !== 'string') return false;
-        const c = h.toLowerCase();
-        return c.includes('subject');
-      });
-      const levelsIdx = headers.findIndex(h => {
-        if (typeof h !== 'string') return false;
-        const c = h.toLowerCase();
-        return c.includes('level');
-      });
       
       const normalizeYearGroup = (val: any): YearGroup => {
         if (!val) return 7;
-        const s = String(val).trim();
-        const num = parseInt(s);
-        // Check explicit IGCSE/IB strings first
-        if (s.toLowerCase().includes('igcse') || num === 10 || num === 11) {
-          if (num === 11 || s.includes('11')) return '11 IGCSE';
-          return '10 IGCSE';
-        }
-        if (s.toLowerCase().includes('ib') || num === 12 || num === 13) {
-          if (num === 13 || s.includes('13')) return '13 IB';
-          return '12 IB';
-        }
-        if (num === 7 || s === '7') return 7;
-        if (num === 8 || s === '8') return 8;
-        if (num === 9 || s === '9') return 9;
-        // For plain numeric strings like "10 IGCSE", "11 IGCSE" — extract leading number
-        const match = s.match(/^(\d+)/);
-        if (match) {
-          const n = parseInt(match[1]);
-          if (n === 7) return 7;
-          if (n === 8) return 8;
-          if (n === 9) return 9;
-          if (n === 10) return '10 IGCSE';
-          if (n === 11) return '11 IGCSE';
-          if (n === 12) return '12 IB';
-          if (n === 13) return '13 IB';
-        }
+        const s = String(val).toLowerCase();
+        if (s.includes('10')) return '10 IGCSE';
+        if (s.includes('11')) return '11 IGCSE';
+        if (s.includes('12')) return '12 IB';
+        if (s.includes('13')) return '13 IB';
+        if (s.includes('7')) return 7;
+        if (s.includes('8')) return 8;
+        if (s.includes('9')) return 9;
         return 7;
       };
 
-      return dataRows.map(row => {
-        const yearGroup = normalizeYearGroup(row[yearIdx]);
-        // Parse subjects: if column exists use it, else auto-assign all subjects for the year
-        let subjects: string[] = SUBJECTS_BY_YEAR[yearGroup] || [];
-        if (subjectsIdx !== -1 && row[subjectsIdx]) {
-          // Support comma-separated subjects e.g. "Physics, Chemistry" or "Biology"
-          const rawSubjects = String(row[subjectsIdx]).split(',').map((s: string) => s.trim()).filter(Boolean);
-          // Normalise to match exact subject names (case-insensitive)
-          const allSubjectsForYear = SUBJECTS_BY_YEAR[yearGroup] || [];
-          subjects = rawSubjects.map((rs: string) => {
-            const match = allSubjectsForYear.find(s => s.toLowerCase() === rs.toLowerCase());
-            return match || rs; // use matched name or keep as-is
-          });
-        }
-        // Parse HL/SL levels — comma-separated in same order as subjects
-        let subjectLevels: Record<string, string> = {};
-        if (levelsIdx !== -1 && row[levelsIdx] && subjects.length > 0) {
-          const rawLevels = String(row[levelsIdx]).split(',').map((l: string) => l.trim().toUpperCase());
-          subjects.forEach((subj: string, i: number) => {
-            const level = rawLevels[i];
-            if (level === 'HL' || level === 'SL') subjectLevels[subj] = level;
-          });
-        }
-        return {
-          id: Math.random().toString(36).substr(2, 9),
-          name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
-          yearGroup,
-          groupName: (groupIdx !== -1 ? String(row[groupIdx] || '') : guessedGroup) || '',
-          academicYear: selectedAcademicYear,
-          subjects,
-          ...(Object.keys(subjectLevels).length > 0 && { subjectLevels })
-        };
-      }).filter(s => s.name !== '' && s.name !== ' ');
+      return dataRows.map(row => ({
+        id: Math.random().toString(36).substr(2, 9),
+        name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
+        yearGroup: normalizeYearGroup(row[yearIdx]),
+        groupName: (groupIdx !== -1 ? String(row[groupIdx] || '') : guessedGroup) || '',
+        academicYear: selectedAcademicYear
+      })).filter(s => s.name !== '' && s.name !== ' ');
     };
 
     const finalizeImport = (newStudents: any[]) => {
@@ -1032,29 +850,6 @@ export default function App() {
 
       if (toAdd.length > 0) {
         setStudents(prev => [...prev, ...toAdd]);
-        
-        // Auto-create group entries for any new groups discovered
-        const newGroupEntries: Group[] = [];
-        const groupKeys = new Set(groups.map(g => `${String(g.yearGroup)}|${g.name}|${g.academicYear}`));
-        
-        toAdd.forEach(s => {
-          if (!s.groupName) return;
-          const key = `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`;
-          if (!groupKeys.has(key)) {
-            newGroupEntries.push({
-              id: Math.random().toString(36).substr(2, 9),
-              yearGroup: s.yearGroup,
-              name: s.groupName,
-              academicYear: s.academicYear
-            });
-            groupKeys.add(key);
-          }
-        });
-        
-        if (newGroupEntries.length > 0) {
-          setGroups(prev => [...prev, ...newGroupEntries]);
-        }
-        
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 3000);
       }
@@ -1123,165 +918,29 @@ export default function App() {
     });
   };
 
-  const downloadStudentTemplate = () => {
-    const wb = XLSX.utils.book_new();
-
-    // ── Sheet 1: Years 7-9 ───────────────────────────────────────────────────
-    const ks3Data = [
-      ['Surname', 'Forename', 'Year Group', 'Group'],
-      ['Ahmed',   'Sarah',    '7',          '7W'],
-      ['Brown',   'James',    '7',          '7W'],
-      ['Clarke',  'Emma',     '7',          '7X'],
-      ['Patel',   'Priya',    '8',          '8A'],
-      ['Wilson',  'Tom',      '8',          '8A'],
-      ['Hassan',  'Yusuf',    '9',          '9B'],
-    ];
-    const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
-    // Style header row width
-    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, ws1, 'Years 7-9');
-
-    // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
-    const igcseData = [
-      ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects'],
-      ['Ahmed',   'Sarah',    '10 IGCSE',   '10A',   'Physics, Chemistry, Biology'],
-      ['Brown',   'James',    '10 IGCSE',   '10A',   'Physics, Computer Science'],
-      ['Clarke',  'Emma',     '10 IGCSE',   '10B',   'Chemistry, Biology, Computer Science'],
-      ['Patel',   'Priya',    '11 IGCSE',   '11A',   'Physics, Chemistry, Biology'],
-      ['Wilson',  'Tom',      '11 IGCSE',   '11A',   'Biology, Computer Science'],
-    ];
-    const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
-    ws2['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, ws2, 'Years 10-11 IGCSE');
-
-    // ── Sheet 3: Years 12-13 IB ──────────────────────────────────────────────
-    const ibData = [
-      ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels (HL or SL per subject, same order)'],
-      ['Ahmed',   'Sarah',    '12 IB',      '12A',   'Physics, Chemistry, ESS',            'HL, SL, SL'],
-      ['Brown',   'James',    '12 IB',      '12A',   'Biology, Computer Science',          'HL, SL'],
-      ['Clarke',  'Emma',     '12 IB',      '12B',   'Physics, Chemistry, Biology',        'HL, HL, SL'],
-      ['Patel',   'Priya',    '13 IB',      '13A',   'Physics, ESS, Computer Science',     'SL, SL, HL'],
-      ['Wilson',  'Tom',      '13 IB',      '13A',   'Biology, Chemistry',                 'HL, SL'],
-    ];
-    const ws3 = XLSX.utils.aoa_to_sheet(ibData);
-    ws3['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 45 }];
-    XLSX.utils.book_append_sheet(wb, ws3, 'Years 12-13 IB');
-
-    // ── Sheet 4: Instructions ────────────────────────────────────────────────
-    const instructions = [
-      ['STUDENT LIST UPLOAD — INSTRUCTIONS'],
-      [''],
-      ['Use the correct sheet for your year group and fill in one row per student.'],
-      [''],
-      ['COLUMN GUIDE'],
-      ['Surname',      'Student family name'],
-      ['Forename',     'Student first name'],
-      ['Year Group',   'Must be exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
-      ['Group',        'Class code e.g. 7W, 10A, 12B — must match exactly across sheets'],
-      ['Subjects',     'IGCSE & IB only. Comma-separated from: Physics, Chemistry, Biology, Computer Science, ESS'],
-      ['Levels',       'IB only. One HL or SL per subject in the same order as the Subjects column'],
-      [''],
-      ['SUBJECTS BY YEAR'],
-      ['Years 7-9',    'Science, Computer Science (assigned automatically — no column needed)'],
-      ['Years 10-11',  'Physics, Chemistry, Biology, Computer Science'],
-      ['Years 12-13',  'Physics, Chemistry, Biology, Computer Science, ESS'],
-      [''],
-      ['TIPS'],
-      ['• Delete the example rows before uploading — keep only the header row and your students.'],
-      ['• Year group values must match exactly (e.g. "10 IGCSE" not "Year 10" or "10").'],
-      ['• Group names are case-sensitive — "10A" and "10a" will be treated as different groups.'],
-      ['• For IB students, the Levels column must have the same number of entries as Subjects.'],
-      ['• You can upload separate sheets for each year group or combine them in one file.'],
-    ];
-    const ws4 = XLSX.utils.aoa_to_sheet(instructions);
-    ws4['!cols'] = [{ wch: 20 }, { wch: 70 }];
-    XLSX.utils.book_append_sheet(wb, ws4, 'Instructions');
-
-    XLSX.writeFile(wb, 'Student_List_Template.xlsx');
-  };
-
   const downloadTemplate = () => {
-    const wb = XLSX.utils.book_new();
-
-    // ── Sheet 1: Years 7-9 (Science + Computer Science) ─────────────────────
-    // One row per student per subject. Assessment columns = "Assessment Name (max marks)"
-    const ks3Headers = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Test 1 (50)', 'Test 2 (30)', 'End of Term (100)'];
-    const ks3Data = [
-      ks3Headers,
-      ['Ahmed',  'Sarah', '7', '7W', 'Science',          42, 25, 78],
-      ['Ahmed',  'Sarah', '7', '7W', 'Computer Science', 38, 22, 65],
-      ['Brown',  'James', '7', '7W', 'Science',          45, 28, 82],
-      ['Brown',  'James', '7', '7W', 'Computer Science', 40, 20, 70],
-      ['Clarke', 'Emma',  '8', '8A', 'Science',          48, 27, 85],
-      ['Clarke', 'Emma',  '8', '8A', 'Computer Science', 44, 26, 75],
+    const headers = ['studentName', 'yearGroup', 'groupName', 'assessmentName', 'subject', 'score', 'maxMarks', 'date'];
+    const sampleData = [
+      ['John Doe', '10 IGCSE', '10-A', 'Midterm Exam', 'Physics', '85', '100', '2024-03-15'],
+      ['Jane Smith', '10 IGCSE', '10-A', 'Midterm Exam', 'Physics', '92', '100', '2024-03-15'],
+      ['Bob Wilson', '11 IGCSE', '11-B', 'Unit Test 1', 'Computer Science', '18', '20', '2024-03-10'],
+      ['Alice Brown', '12 IB', '12-C', 'Internal Assessment', 'Biology', '22', '24', '2024-03-20']
     ];
-    const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
-    ws1['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, ws1, 'Years 7-9 Marks');
-
-    // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
-    // Option A: one row per student, subject encoded in column headers
-    // Assessment columns use "Assessment Name - Subject (maxMarks)" format
-    const igcseHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Paper 1 - Physics (80)', 'Paper 1 - Chemistry (80)', 'Paper 1 - Biology (80)', 'Programming - Computer Science (35)', 'Mock - Physics (100)'];
-    const igcseData = [
-      igcseHeaders,
-      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Physics,Chemistry,Biology',    65, 70, 60, '',  72],
-      ['Brown',  'James', '10 IGCSE', '10A', 'Physics,Computer Science',     55, '', '', 65,  60],
-      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Physics,Chemistry',            70, 68, '', '',  75],
-    ];
-    const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
-    ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 24 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 20 }];
-    XLSX.utils.book_append_sheet(wb, ws2, 'Years 10-11 Marks');
-
-    // ── Sheet 3: Years 12-13 IB (with Level column) ──────────────────────────
-    // Subject encoded in column headers — one row per student
-    const ibHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels', 'Test 1 - Physics (45)', 'Test 1 - Chemistry (45)', 'IA - Biology (24)', 'Mock - Physics (100)', 'Mock - Chemistry (100)'];
-    const ibData = [
-      ibHeaders,
-      ['Ahmed',  'Sarah', '12 IB', '12A', 'Physics,Chemistry,ESS',      'HL,SL,SL', 38, 30, '',  75, 62],
-      ['Brown',  'James', '12 IB', '12A', 'Biology,Computer Science',   'HL,SL',    '', '', 22,  '',  ''],
-      ['Clarke', 'Emma',  '13 IB', '13A', 'Physics,Chemistry',          'HL,SL',    42, 32, '',  82, 65],
-    ];
-    const ws3 = XLSX.utils.aoa_to_sheet(ibData);
-    ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 28 }, { wch: 12 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 20 }, { wch: 22 }];
-    XLSX.utils.book_append_sheet(wb, ws3, 'Years 12-13 IB Marks');
-
-    // ── Sheet 4: Instructions ────────────────────────────────────────────────
-    const instructions = [
-      ['ASSESSMENT MARKS UPLOAD — INSTRUCTIONS'],
-      [''],
-      ['HOW TO USE THIS TEMPLATE'],
-      ['1.', 'Choose the correct sheet for your year group (Years 7-9, IGCSE, or IB).'],
-      ['2.', 'Delete the example rows — keep only the header row.'],
-      ['3.', 'Add one row per student per subject (e.g. Sarah Ahmed appears once for Physics, once for Chemistry).'],
-      ['4.', 'Add or rename assessment columns as needed — include max marks in brackets e.g. "Unit Test (40)".'],
-      ['5.', 'Leave a cell blank if a student has not yet sat that assessment.'],
-      ['6.', 'Save the file and upload it using the "Upload Completed File" button.'],
-      [''],
-      ['COLUMN GUIDE'],
-      ['Surname',      'Student family name — must match exactly the name already in the app'],
-      ['Forename',     'Student first name — must match exactly the name already in the app'],
-      ['Year Group',   'Exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
-      ['Group',        'Class code e.g. 7W, 10A — must match what is in the app'],
-      ['Subject',      'One subject per row: Science, Computer Science, Physics, Chemistry, Biology, or ESS'],
-      ['Level',        'IB only: HL or SL for each row'],
-      ['Assessment columns', 'Format: "Assessment Name - Subject (max marks)" e.g. "Paper 1 - Physics (80)" or just "Test 1 (50)" if one subject per row'],
-      [''],
-      ['TIPS'],
-      ['• You can have as many assessment columns as you like.'],
-      ['• KEY: For IGCSE/IB, put the subject in the column header: "Paper 1 - Physics (80)". This tells the app which subject each assessment belongs to.'],
-      ['• Leave a cell blank if a student did not sit that assessment — blank cells are skipped.'],
-      ['• If a student does not have a mark for an assessment, leave the cell empty.'],
-      ['• Student names must match exactly what is already in the app (same spelling and spacing).'],
-      ['• If a student is not yet in the app they will be created automatically on import.'],
-      ['• You can mix multiple classes on one sheet — the Group column separates them.'],
-      ['• Multiple sheets in one workbook are all imported at once.'],
-    ];
-    const ws4 = XLSX.utils.aoa_to_sheet(instructions);
-    ws4['!cols'] = [{ wch: 22 }, { wch: 75 }];
-    XLSX.utils.book_append_sheet(wb, ws4, 'Instructions');
-
-    XLSX.writeFile(wb, 'Assessment_Marks_Template.xlsx');
+    
+    const csvContent = [
+      headers.join(','),
+      ...sampleData.map(row => row.join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'student_marks_template.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1306,8 +965,6 @@ export default function App() {
         // Filter for columns that are likely scores (not metadata and contain numeric data)
         const extraColumns = headers.filter(h => {
           if (metadataHeaders.includes(normalizeKey(h))) return false;
-          // Skip blank/auto-generated XLSX column names (from empty header cells)
-          if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
           
           // Check if at least one row has a numeric value in this column
           return data.some((row: any) => {
@@ -1337,18 +994,13 @@ export default function App() {
         
         setImportConfig({
           yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
-          groupName: (() => {
-            const m = fileName.match(/^(\d{1,2}[A-Za-z]{1,4}|\d{1,2})/);
-            return (m && m[1]) ? m[1] : fileName;
-          })(),
+          groupName: fileName,
           assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
           subject: SUBJECTS_BY_YEAR[(yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter][0],
           maxMarks: 100,
           date: new Date().toISOString().split('T')[0]
         });
         
-        setImportPreview(null);
-        setImportColumnSubjects({});
         setShowImportModal(true);
         e.target.value = '';
       };
@@ -1358,11 +1010,11 @@ export default function App() {
         reader.onload = (evt) => {
           const data = evt.target?.result;
           const wb = XLSX.read(data, { type: 'array' });
-
+          
           const allData: any[] = [];
           wb.SheetNames.forEach(wsname => {
             const ws = wb.Sheets[wsname];
-            const jsonData = XLSX.utils.sheet_to_json(ws, { defval: null });
+            const jsonData = XLSX.utils.sheet_to_json(ws);
             if (jsonData.length > 0) {
               jsonData.forEach((row: any) => {
                 row.__sheetName = wsname;
@@ -1370,7 +1022,7 @@ export default function App() {
               allData.push(...jsonData);
             }
           });
-
+          
           processData(allData, wb.SheetNames[0]);
         };
         reader.readAsArrayBuffer(file);
@@ -1386,7 +1038,7 @@ export default function App() {
     }
   };
 
-  const confirmImport = async () => {
+  const confirmImport = () => {
     if (!pendingImport) return;
 
     const { data, sheetName: defaultSheetName } = pendingImport;
@@ -1417,84 +1069,47 @@ export default function App() {
       return foundKey ? row[foundKey] : undefined;
     };
 
-    // Helper: normalise level value to 'HL' | 'SL' | undefined
-    const normalizeLevel = (val: any): 'HL' | 'SL' | undefined => {
-      if (!val) return undefined;
-      const s = String(val).trim().toUpperCase();
-      if (s === 'HL' || s === 'HIGHER' || s === 'HIGHER LEVEL') return 'HL';
-      if (s === 'SL' || s === 'STANDARD' || s === 'STANDARD LEVEL') return 'SL';
-      return undefined;
-    };
-
-    // Normalise a subject string to match SUBJECTS_BY_YEAR keys (case-insensitive)
-    const normalizeSubjectName = (raw: string): string => {
-      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
-      const match = allSubjects.find(s => s.toLowerCase() === raw.trim().toLowerCase());
-      return match || raw.trim();
-    };
-
     const extractInfo = (header: string, rowData?: any, sheetName?: string) => {
       let name = header;
       let maxMarks = defaultMaxMarks;
-      let subjectFromHeader: string | undefined;
 
-      // 1. Extract max marks from header: "Topic 1 (29)" or "Topic 1(29)"
+      // 1. Extract marks from header: "Topic 1 (29)"
       const marksMatch = header.match(/\((\d+)\)/);
       if (marksMatch) {
         maxMarks = parseInt(marksMatch[1]);
         name = header.replace(marksMatch[0], '').trim();
       }
 
-      // 2. Extract subject from header if present after a dash:
-      //    "Programming - Computer Science" → name=Programming, subject=Computer Science
-      //    "Topic 3 Data - Physics"         → name=Topic 3 Data, subject=Physics
-      const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      if (dashMatch) {
-        const possibleSubject = dashMatch[2].trim();
-        const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
-        const isKnownSubject = allSubjects.some(s => s.toLowerCase() === possibleSubject.toLowerCase());
-        if (isKnownSubject) {
-          name = dashMatch[1].trim();
-          subjectFromHeader = normalizeSubjectName(possibleSubject);
-        }
-      }
-
-      // 3. Check for sub-header in the first row of data
+      // 2. Check for sub-header in the first row of data
       if (rowData && rowData[header]) {
         const subVal = String(rowData[header]);
         const subMarksMatch = subVal.match(/\((\d+)\)/);
         if (subMarksMatch) {
           maxMarks = parseInt(subMarksMatch[1]);
+          // If the main header was generic, use the subheader name
           if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
             name = subVal.replace(subMarksMatch[0], '').trim() || name;
           }
         }
       }
 
-      // 4. Handle __EMPTY or generic names
+      // 3. Handle __EMPTY or generic names
       if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
         name = sheetName || 'Test Topic';
       }
 
-      return { name, maxMarks, subjectFromHeader };
+      return { name, maxMarks };
     };
 
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const metadataHeaders = [
-      'studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname',
-      'surname', 'lastname', 'forename', 'firstname',
-      'yeargroup', 'year', 'groupname', 'group', 'class',
-      'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
+      'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
       'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname'
     ].map(h => normalizeKey(h));
 
     const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
     const scoreColumns: string[] = headers.filter(h => {
       if (metadataHeaders.includes(normalizeKey(h))) return false;
-      // Skip blank/auto-generated XLSX column names (from empty header cells)
-      if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
-      // Include if header has "(N)" marks pattern (even if all values currently null)
-      if (/\(\d+\)/.test(h)) return true;
       return data.some((row: any) => {
         const val = row[h];
         return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
@@ -1507,124 +1122,25 @@ export default function App() {
     const dataToProcess = isFirstRowSubHeader ? data.slice(1) : data;
 
     dataToProcess.forEach((row: any) => {
-      // Support both "Student Name" single column and "Surname" + "Forename" split columns
-      let studentNameRaw = findValue(row, ['studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname']);
-      if (!studentNameRaw) {
-        const surname = findValue(row, ['surname', 'lastname', 'last name', 'familyname']);
-        const forename = findValue(row, ['forename', 'firstname', 'first name', 'givenname']);
-        if (surname || forename) {
-          studentNameRaw = `${String(forename || '').trim()} ${String(surname || '').trim()}`.trim();
-        }
-      }
+      const studentNameRaw = findValue(row, ['studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname']);
       if (!studentNameRaw) return;
       const studentName = String(studentNameRaw).trim();
 
       const rowSheetName = row.__sheetName || defaultSheetName;
 
-      // Derive the year group: prefer the import config (set by user in the modal),
-      // but also accept the per-row Year Group cell as a cross-check.
-      // If the row's Year Group cell disagrees with the import config, trust the import config —
-      // this protects against data-entry errors like "11 IGCSE", "12 IGCSE" appearing in a 10R sheet.
-      const rowYearGroupRaw = findValue(row, ['yeargroup', 'year group', 'year']);
-      const rowYearGroup = (() => {
-        if (!rowYearGroupRaw) return yearGroup;
-        const s = String(rowYearGroupRaw).trim().toLowerCase();
-        if (s.includes('10')) return '10 IGCSE' as YearGroup;
-        if (s.includes('11')) return '11 IGCSE' as YearGroup;
-        if (s.includes('12') && s.includes('ib')) return '12 IB' as YearGroup;
-        if (s.includes('13') && s.includes('ib')) return '13 IB' as YearGroup;
-        if (s === '7') return 7 as YearGroup;
-        if (s === '8') return 8 as YearGroup;
-        if (s === '9') return 9 as YearGroup;
-        return yearGroup;
-      })();
-      // If row says a different year from import config, trust import config (handles data entry errors)
-      let effectiveYearGroup = String(rowYearGroup) === String(yearGroup) ? yearGroup : yearGroup;
-
-      // Read per-row subject and level (overrides the import config defaults for this row)
-      const rowSubjectOverride = findValue(row, ['subject', 'subjects']);
-      const rowLevel = normalizeLevel(findValue(row, ['level', 'ib level', 'iblevel']));
-
-      // Determine group name with this priority:
-      // 1. The 'Group' or 'Class' column in the row data (most explicit — e.g. '10R', '10S', '7W')
-      // 2. The sheet name (set as __sheetName on every row for Excel imports)
-      // 3. The importConfig groupName (filename fallback for CSV imports)
-      const rowGroupCol = findValue(row, ['group', 'class', 'groupname']);
-      const rowGroupName = rowGroupCol ? String(rowGroupCol).trim() : null;
-      const effectiveGroupName = rowGroupName || rowSheetName || groupName;
-
-      // Derive year group from group name if possible (e.g., "10R" -> "10 IGCSE")
-      if (effectiveGroupName) {
-        const match = effectiveGroupName.match(/^(\d+)/);
-        if (match) {
-          const yearNum = parseInt(match[1]);
-          if (yearNum === 10) effectiveYearGroup = '10 IGCSE';
-          else if (yearNum === 11) effectiveYearGroup = '11 IGCSE';
-          else if (yearNum === 12) effectiveYearGroup = '12 IB';
-          else if (yearNum === 13) effectiveYearGroup = '13 IB';
-          else if (yearNum >= 7 && yearNum <= 9) effectiveYearGroup = yearNum as YearGroup;
-        }
-      }
-
-      // Also ensure group record exists for this effectiveGroupName
-      if (effectiveGroupName) {
-        const gKey = `${String(effectiveYearGroup)}|${effectiveGroupName}|${selectedAcademicYear}`;
-        const groupKeys = new Set(newGroups.map(g => `${String(g.yearGroup)}|${g.name}|${g.academicYear}`));
-        if (!groupKeys.has(gKey)) {
-          newGroups.push({
-            id: Math.random().toString(36).substr(2, 9),
-            yearGroup: effectiveYearGroup,
-            name: effectiveGroupName,
-            academicYear: selectedAcademicYear
-          });
-        }
-      }
-
-      // Ensure student exists — match by name + yearGroup (normalised) + group + academicYear
-      // Normalise yearGroup for comparison to handle numeric vs string (e.g. 10 vs "10 IGCSE")
-      const normaliseYGStr = (y: any) => {
-        const s = String(y).trim();
-        if (s === '10' || s === '10 IGCSE') return '10 IGCSE';
-        if (s === '11' || s === '11 IGCSE') return '11 IGCSE';
-        if (s === '12' || s === '12 IB') return '12 IB';
-        if (s === '13' || s === '13 IB') return '13 IB';
-        return s;
-      };
-      // Match by name + yearGroup + academicYear only (NOT groupName).
-      // This ensures re-importing always corrects a student's groupName
-      // if it was wrong from a previous import (e.g. "10 IGCSE" -> "10R").
-      let student = newStudents.find(s => 
-        s.name.trim().toLowerCase() === studentName.toLowerCase() && 
-        normaliseYGStr(s.yearGroup) === normaliseYGStr(effectiveYearGroup) && 
-        s.academicYear === selectedAcademicYear
-      );
+      // Ensure student exists
+      let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === yearGroup && s.academicYear === selectedAcademicYear);
       if (!student) {
         student = { 
           id: Math.random().toString(36).substr(2, 9), 
           name: studentName, 
-          yearGroup: effectiveYearGroup,
-          groupName: effectiveGroupName,
+          yearGroup,
+          groupName,
           academicYear: selectedAcademicYear
-        } as any;
+        };
         newStudents.push(student);
-      } else if (student.groupName !== effectiveGroupName) {
-        student.groupName = effectiveGroupName;
-      }
-
-      // Store subject level on student if provided (e.g. Physics: HL)
-      if (rowSubjectOverride && rowLevel) {
-        const subjectKey = rowSubjectOverride.trim();
-        const existing = (student as any).subjectLevels || {};
-        (student as any).subjectLevels = { ...existing, [subjectKey]: rowLevel };
-      }
-
-      // Update subjects list on student from this row's subject
-      if (rowSubjectOverride) {
-        const subj = rowSubjectOverride.trim();
-        const existingSubjects: string[] = (student as any).subjects || [];
-        if (!existingSubjects.includes(subj)) {
-          (student as any).subjects = [...existingSubjects, subj];
-        }
+      } else if (student.groupName !== groupName) {
+        student.groupName = groupName;
       }
 
       if (hasAssessmentNameColumn) {
@@ -1664,42 +1180,15 @@ export default function App() {
       } else if (scoreColumns.length > 0) {
         // Column-based assessments
         scoreColumns.forEach(col => {
-          if (row[col] === undefined || row[col] === null || row[col] === '') return;
+          if (row[col] === undefined) return;
           
-          const rawVal = String(row[col]).trim();
-          
-          // Detect explicit absent markers
-          const isAbsent = /^(absent|abs|a\/a|n\/a|na|-)$/i.test(rawVal);
-          
-          // Skip non-numeric, non-absent values (e.g. "new", "tbd")
-          if (!isAbsent && isNaN(parseFloat(rawVal))) return;
-
-          const rowScoreRaw = isAbsent ? 0 : parseFloat(rawVal);
-          const { name: rowAssessmentName, maxMarks: rowMaxMarks, subjectFromHeader } = extractInfo(col, isFirstRowSubHeader ? firstRow : null, rowSheetName);
-          const rowScore = isAbsent ? 0 : Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
-          // Subject priority: 1) encoded in column header ("Assessment - Physics (35)")
-          //                   2) per-row Subject/Subjects column (only if single subject)
-          //                   3) import config default
-          const rowSubjectRaw = rowSubjectOverride ? rowSubjectOverride.trim() : defaultSubject;
-          const subjectsAreMultiple = rowSubjectRaw.includes(',');
-          // Subject priority:
-          // 1. Encoded in column header: "Programming - Computer Science(35)"
-          // 2. User assigned per-column in the import preview UI (importColumnSubjects)
-          // 3. Per-row Subject column (only if single subject, not comma-separated list)
-          // 4. Global import config subject (fallback)
-          const rowSubject = subjectFromHeader 
-            || importColumnSubjects[col]
-            || (subjectsAreMultiple ? defaultSubject : rowSubjectRaw);
+          const rowScoreRaw = parseFloat(row[col]) || 0;
+          const { name: rowAssessmentName, maxMarks: rowMaxMarks } = extractInfo(col, isFirstRowSubHeader ? firstRow : null, rowSheetName);
+          const rowScore = Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
+          const rowSubject = defaultSubject;
           const rowDate = defaultDate;
 
-          // Match assessment: name + subject + yearGroup + academicYear
-          // Use String() comparison to handle type mismatches
-          let assessment = newAssessments.find(a => 
-            a.name.trim().toLowerCase() === rowAssessmentName.trim().toLowerCase() && 
-            String(a.yearGroup) === String(yearGroup) && 
-            a.subject === rowSubject && 
-            a.academicYear === selectedAcademicYear
-          );
+          let assessment = newAssessments.find(a => a.name.trim().toLowerCase() === rowAssessmentName.trim().toLowerCase() && a.yearGroup === yearGroup && a.subject === rowSubject && a.academicYear === selectedAcademicYear);
           if (!assessment) {
             assessment = {
               id: Math.random().toString(36).substr(2, 9),
@@ -1711,28 +1200,18 @@ export default function App() {
               academicYear: selectedAcademicYear
             };
             newAssessments.push(assessment);
-          } else {
-            // Update maxMarks if the header specifies a different value
-            if (rowMaxMarks !== defaultMaxMarks) {
-              assessment.maxMarks = rowMaxMarks;
-            }
           }
 
-          // Update existing mark or add new one; handle absent flag
           const existingMarkIdx = newMarks.findIndex(m => m.studentId === student!.id && m.assessmentId === assessment!.id);
           if (existingMarkIdx !== -1) {
-            if (isAbsent) {
-              (newMarks[existingMarkIdx] as any).absent = true;
-              newMarks[existingMarkIdx].score = 0;
-            } else {
-              newMarks[existingMarkIdx].score = rowScore;
-              delete (newMarks[existingMarkIdx] as any).absent;
-            }
+            newMarks[existingMarkIdx].score = rowScore;
           } else {
-            newMarks.push(isAbsent
-              ? { id: Math.random().toString(36).substr(2, 9), studentId: student!.id, assessmentId: assessment.id, score: 0, absent: true } as any
-              : { id: Math.random().toString(36).substr(2, 9), studentId: student!.id, assessmentId: assessment.id, score: rowScore }
-            );
+            newMarks.push({ 
+              id: Math.random().toString(36).substr(2, 9),
+              studentId: student!.id, 
+              assessmentId: assessment.id, 
+              score: rowScore 
+            });
           }
         });
       } else {
@@ -1767,172 +1246,15 @@ export default function App() {
       }
     });
 
-    // Immediately persist to Firebase so data survives a refresh
-    // (don't rely on the debounced save useEffect which has a 1s delay)
-    setSaveStatus('saving');
-    try {
-      await Promise.all([
-        ...newStudents.map((s: any) => setDoc(doc(db, 'students', s.id), {
-          ...s, yearGroup: migrateYear(s.yearGroup)
-        })),
-        ...newAssessments.map((a: any) => setDoc(doc(db, 'assessments', a.id), {
-          ...a, yearGroup: migrateYear(a.yearGroup)
-        })),
-        ...newMarks.map((m: any) => setDoc(doc(db, 'marks', m.id), m)),
-        ...newGroups.map((g: any) => setDoc(doc(db, 'groups', g.id), {
-          ...g, yearGroup: migrateYear(g.yearGroup)
-        })),
-      ]);
-    } catch (saveError) {
-      console.error('Import save failed:', saveError);
-    }
-
-    // Block orphan cleanup while we update all state together
-    // (prevents race where new groups appear orphaned before students are updated)
-    isImporting.current = true;
     setGroups(newGroups);
     setStudents(newStudents);
     setAssessments(newAssessments);
     setMarks(newMarks);
-    // Release the block after React has processed all state updates
-    setTimeout(() => { isImporting.current = false; }, 100);
-    
-    const newStudentCount = newStudents.length - students.length;
-    const newAssessmentCount = newAssessments.length - assessments.length;
-    const newMarkCount = newMarks.length - marks.length;
     
     setShowImportModal(false);
     setPendingImport(null);
-    setImportPreview(null);
-    setImportColumnSubjects({});
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 3000);
-
-    // Show summary alert
-    const parts = [];
-    if (newStudentCount > 0) parts.push(`${newStudentCount} new student${newStudentCount > 1 ? 's' : ''}`);
-    if (newAssessmentCount > 0) parts.push(`${newAssessmentCount} new assessment${newAssessmentCount > 1 ? 's' : ''}`);
-    if (newMarkCount > 0) parts.push(`${newMarkCount} mark${newMarkCount > 1 ? 's' : ''} added/updated`);
-    if (parts.length > 0) {
-      alert('Import complete: ' + parts.join(', ') + '.');
-    } else {
-      alert('Import complete — no new data detected. Check that student names match exactly and column headers include max marks e.g. "Test 1 (50)".');
-    }
-  };
-
-  // Dry-run the import to show a preview of what will be created/updated
-  const previewImport = () => {
-    if (!pendingImport) return;
-    const { data } = pendingImport;
-    const { yearGroup, subject: defaultSubject, maxMarks: defaultMaxMarks } = importConfig;
-
-    const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s_]/g, '');
-    const metadataKeys = [
-      'studentname','name','student','fullname','pupil','pupilname',
-      'surname','lastname','forename','firstname',
-      'yeargroup','year','groupname','group','class',
-      'subject','subjects','level','iblevel','date','maxmarks','assessmentname','score','mark',
-      'upn','uln','gender','dob','sen','pp','fsm','eal','ethnicity','notes','comments',
-      'attendance','email','id','mis_id','__sheetname'
-    ].map(normalizeKey);
-
-    const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
-    const scoreColumns = headers.filter(h => {
-      if (metadataKeys.includes(normalizeKey(h))) return false;
-      // Skip blank/auto-generated XLSX column names (from empty header cells)
-      if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
-      // Include column if it has numeric data OR if header contains "(N)" max-marks pattern
-      // This catches assessment columns that are all-empty (e.g. not yet marked)
-      if (/\(\d+\)/.test(h)) return true;
-      return data.some((row: any) => {
-        const v = row[h];
-        return v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()));
-      });
-    });
-
-    // Discover assessments from column headers
-    const assessmentNames: string[] = scoreColumns.map(col => {
-      const marksMatch = col.match(/\((\d+)\)/);
-      let name = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
-      // Strip subject suffix if present
-      const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
-      if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
-        name = dashMatch[1].trim();
-      }
-      const maxMarks = marksMatch ? parseInt(marksMatch[1]) : defaultMaxMarks;
-      // Find subject
-      let subject = defaultSubject;
-      if (dashMatch) {
-        const possSubj = dashMatch[2].trim();
-        const matched = allSubjects.find(s => s.toLowerCase() === possSubj.toLowerCase());
-        if (matched) subject = matched;
-      }
-      return `\${name} (\${subject}, \${maxMarks} marks)`;
-    });
-
-    const studentNames = new Set<string>();
-    const detectedGroups = new Set<string>();
-    let markCount = 0;
-    data.forEach((row: any) => {
-      let nameRaw = ['studentname','name','student','fullname','pupil','pupilname']
-        .map(k => Object.keys(row).find(rk => normalizeKey(rk) === k))
-        .filter(Boolean).map(k => row[k!])[0];
-      if (!nameRaw) {
-        const surnameKey = Object.keys(row).find(k => normalizeKey(k) === 'surname' || normalizeKey(k) === 'lastname');
-        const forenameKey = Object.keys(row).find(k => normalizeKey(k) === 'forename' || normalizeKey(k) === 'firstname');
-        if (surnameKey || forenameKey) {
-          nameRaw = `\${row[forenameKey||'']||''} \${row[surnameKey||'']||''}`.trim();
-        }
-      }
-      if (!nameRaw) return;
-      studentNames.add(String(nameRaw).trim());
-      // Detect group from the Group column or sheet name
-      const groupKey = Object.keys(row).find((k: string) => {
-        const nk = normalizeKey(k);
-        return nk === 'group' || nk === 'class' || nk === 'groupname';
-      });
-      const groupVal = groupKey ? String(row[groupKey]).trim() : (row.__sheetName ? String(row.__sheetName).trim() : '');
-      if (groupVal && groupVal !== 'null' && groupVal !== 'undefined') detectedGroups.add(groupVal);
-      scoreColumns.forEach(col => {
-        const v = row[col];
-        if (v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()))) markCount++;
-      });
-    });
-
-    // Build per-column subject assignments (auto-detected from header or blank)
-    const colSubjects: Record<string, string> = {};
-    scoreColumns.forEach(col => {
-      const marksMatch = col.match(/\((\d+)\)/);
-      let name = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
-      const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
-      if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
-        colSubjects[col] = allSubjects.find(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())!;
-      } else {
-        // Fall back to the subject already selected in the import config
-        colSubjects[col] = defaultSubject || '';
-      }
-    });
-    setImportColumnSubjects(colSubjects);
-
-    // If no Group column found, try to extract group name from filename
-    // e.g. "10S_CS_2026" -> "10S", "10R_2026" -> "10R"
-    if (detectedGroups.size === 0 && pendingImport?.fileName) {
-      const fnMatch = pendingImport.fileName.match(/^([A-Za-z0-9]+)/);
-      if (fnMatch && fnMatch[1] && fnMatch[1].length <= 6) {
-        detectedGroups.add(fnMatch[1]);
-        // Also update the importConfig groupName to the extracted value
-        setImportConfig(prev => ({ ...prev, groupName: fnMatch[1] }));
-      }
-    }
-
-    setImportPreview({
-      assessments: assessmentNames,
-      students: studentNames.size,
-      marks: markCount,
-      groups: Array.from(detectedGroups).sort()
-    });
   };
 
   const handleAddAssessment = (e: React.FormEvent) => {
@@ -1960,19 +1282,12 @@ export default function App() {
 
   const handleAddStudent = (e: React.FormEvent) => {
     e.preventDefault();
-    // If no subjects explicitly set, default to all subjects for the year group
-    const studentSubjects = (newStudent as any).subjects?.length
-      ? (newStudent as any).subjects
-      : SUBJECTS_BY_YEAR[newStudent.yearGroup] || [];
-    const studentSubjectLevels = (newStudent as any).subjectLevels || {};
-    const student = {
+    const student: Student = {
       id: Math.random().toString(36).substr(2, 9),
       ...newStudent,
-      academicYear: selectedAcademicYear,
-      subjects: studentSubjects,
-      ...(Object.keys(studentSubjectLevels).length > 0 && { subjectLevels: studentSubjectLevels })
+      academicYear: selectedAcademicYear
     };
-    setStudents(prev => [...prev, student as Student]);
+    setStudents(prev => [...prev, student]);
     setShowStudentModal(false);
     setNewStudent(prev => ({ ...prev, name: '' })); // Keep yearGroup and groupName
   };
@@ -1994,27 +1309,6 @@ export default function App() {
         [selectedSettingScope]: [...(prev[selectedSettingScope] || []), { grade: 'New', minPercentage: 0 }]
       }));
     }
-  };
-
-  const handleMarkAbsent = (studentId: string, assessmentId: string, absent: boolean) => {
-    setMarks(prev => {
-      const existingIdx = prev.findIndex(m => m.studentId === studentId && m.assessmentId === assessmentId);
-      if (absent) {
-        // Create/update mark as absent (score stored as 0 but excluded from averages)
-        if (existingIdx !== -1) {
-          return prev.map((m, i) => i === existingIdx ? { ...m, absent: true, score: 0 } : m);
-        }
-        return [...prev, { id: Math.random().toString(36).substr(2, 9), studentId, assessmentId, score: 0, absent: true } as any];
-      } else {
-        // Remove absent flag — mark becomes "not yet entered" if score was 0
-        if (existingIdx !== -1) {
-          const updated = { ...prev[existingIdx] };
-          delete (updated as any).absent;
-          return prev.map((m, i) => i === existingIdx ? updated : m);
-        }
-        return prev;
-      }
-    });
   };
 
   const handleUpdateMark = (studentId: string, assessmentId: string, score: number) => {
@@ -2045,7 +1339,6 @@ export default function App() {
       case 'excellent': return 'text-emerald-600 bg-emerald-50 border-emerald-100';
       case 'on-track': return 'text-blue-600 bg-blue-50 border-blue-100';
       case 'needs-improvement': return 'text-rose-600 bg-rose-50 border-rose-100';
-      case 'no-data': return 'text-slate-400 bg-slate-50 border-slate-100';
       default: return 'text-slate-600 bg-slate-50 border-slate-100';
     }
   };
@@ -2120,7 +1413,6 @@ export default function App() {
                   else if (!isNaN(parseInt(val)) && val.length === 1) setYearFilter(parseInt(val) as YearGroup);
                   else setYearFilter(val as YearGroup);
                   setGroupFilter('all'); // Reset group filter when year changes
-                  setPerformanceSubjectFilter('all'); // Reset subject filter when year changes
                 }}
               >
                 <option value="IGCSE_ALL">IGCSE (All)</option>
@@ -2153,17 +1445,10 @@ export default function App() {
               >
                 <option value="all">All Subjects</option>
                 {Array.from(new Set(
-                  // Only show subjects that actually have assessments in the selected year
-                  assessments
-                    .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter))
-                    .map(a => a.subject)
-                    // Fall back to theoretical subjects if no assessments exist yet
-                    .concat(
-                      yearFilter === 'all' ? Object.values(SUBJECTS_BY_YEAR).flat() :
-                      yearFilter === 'IGCSE_ALL' ? [...SUBJECTS_BY_YEAR['10 IGCSE'], ...SUBJECTS_BY_YEAR['11 IGCSE']] :
-                      yearFilter === 'IB_ALL' ? [...SUBJECTS_BY_YEAR['12 IB'], ...SUBJECTS_BY_YEAR['13 IB']] :
-                      SUBJECTS_BY_YEAR[yearFilter as YearGroup] || []
-                    )
+                  yearFilter === 'all' ? Object.values(SUBJECTS_BY_YEAR).flat() :
+                  yearFilter === 'IGCSE_ALL' ? [...SUBJECTS_BY_YEAR['10 IGCSE'], ...SUBJECTS_BY_YEAR['11 IGCSE']] :
+                  yearFilter === 'IB_ALL' ? [...SUBJECTS_BY_YEAR['12 IB'], ...SUBJECTS_BY_YEAR['13 IB']] :
+                  SUBJECTS_BY_YEAR[yearFilter as YearGroup] || []
                 )).map(subject => (
                   <option key={subject} value={subject}>{subject}</option>
                 ))}
@@ -2238,12 +1523,7 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-3xl font-bold text-slate-900 leading-none mb-1">
-                      {(() => {
-                        const withData = filteredPerformances.filter(p => (p as any).hasData);
-                        return withData.length > 0
-                          ? `${(withData.reduce((acc, p) => acc + p.averagePercentage, 0) / withData.length).toFixed(1)}%`
-                          : '—';
-                      })()}
+                      {(filteredPerformances.reduce((acc, p) => acc + p.averagePercentage, 0) / (filteredPerformances.length || 1)).toFixed(1)}%
                     </h2>
                     <p className="text-[10px] text-slate-500 font-medium">
                       {yearFilter === 'all' ? 'School-wide average' 
@@ -2390,7 +1670,6 @@ export default function App() {
                       { label: 'Excellent (80%+)', count: filteredPerformances.filter(p => p.status === 'excellent').length, color: 'bg-emerald-500' },
                       { label: 'On Track (50-80%)', count: filteredPerformances.filter(p => p.status === 'on-track').length, color: 'bg-blue-500' },
                       { label: 'Needs Improvement (<50%)', count: filteredPerformances.filter(p => p.status === 'needs-improvement').length, color: 'bg-rose-500' },
-                      { label: 'New / No Data', count: filteredPerformances.filter(p => (p as any).status === 'no-data').length, color: 'bg-slate-300' },
                     ].map((item) => (
                       <div key={item.label}>
                         <div className="flex justify-between text-sm mb-2">
@@ -2519,7 +1798,7 @@ export default function App() {
                             </div>
                           </div>
                           <span className="text-xs font-bold text-emerald-600 bg-white px-2 py-0.5 rounded-full border border-emerald-100">
-                            {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
+                            {p.averagePercentage.toFixed(1)}%
                           </span>
                         </button>
                       )) : (
@@ -2550,7 +1829,7 @@ export default function App() {
                             </div>
                           </div>
                           <span className="text-xs font-bold text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-100">
-                            {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
+                            {p.averagePercentage.toFixed(1)}%
                           </span>
                         </button>
                       )) : (
@@ -2570,7 +1849,6 @@ export default function App() {
                         { label: 'B/C', count: performanceTabStats.filter(p => p.averagePercentage >= 60 && p.averagePercentage < 80).length, color: 'bg-blue-500' },
                         { label: 'D/E', count: performanceTabStats.filter(p => p.averagePercentage >= 40 && p.averagePercentage < 60).length, color: 'bg-amber-500' },
                         { label: 'U', count: performanceTabStats.filter(p => p.averagePercentage < 40).length, color: 'bg-rose-500' },
-                        { label: 'No data', count: students.filter(s => s.academicYear === selectedAcademicYear && !performanceTabStats.find(p => p.student.id === s.id)).length, color: 'bg-slate-200' },
                       ].map((item) => (
                         <div key={item.label}>
                           <div className="flex justify-between text-[10px] mb-1.5">
@@ -2785,13 +2063,6 @@ export default function App() {
                     Bulk Import
                     <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleBulkStudentImport} />
                   </label>
-                  <button
-                    onClick={downloadStudentTemplate}
-                    className="btn-secondary w-full flex items-center justify-center gap-2 text-indigo-600 border-indigo-100 hover:bg-indigo-50"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download Student Template
-                  </button>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input 
@@ -2813,22 +2084,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Warning banner when groups have year-group-style names (stale import data) */}
-                {groups.filter(g => 
-                  g.academicYear === selectedAcademicYear && 
-                  ['7','8','9','10 IGCSE','11 IGCSE','12 IB','13 IB'].includes(String(g.name))
-                ).length > 0 && (
-                  <div className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2">
-                    <span className="text-amber-500 text-lg leading-none mt-0.5">⚠️</span>
-                    <div className="flex-1">
-                      <p className="text-xs font-bold text-amber-800">Groups not separated correctly</p>
-                      <p className="text-[10px] text-amber-700 mt-0.5">
-                        Some students are grouped under a year label (e.g. "10 IGCSE") instead of their class (e.g. "10R", "10S"). 
-                        Please re-import your Excel files using <strong>Import Data</strong> to fix this — the app will automatically correct the group names.
-                      </p>
-                    </div>
-                  </div>
-                )}
                 <div className="card max-h-[calc(100vh-250px)] overflow-y-auto divide-y divide-slate-100">
                   {filteredPerformances.length === 0 ? (
                     <div className="p-8 text-center">
@@ -2839,8 +2094,9 @@ export default function App() {
                       .filter(y => matchesYearFilter(y, yearFilter))
                       .map(year => {
                         const yearStudents = filteredPerformances.filter(p => p.student.yearGroup === year);
-                        // Only show groups that have actual students (prevents ghost/deleted groups)
-                        const yearGroups = (Array.from(new Set(yearStudents.map(p => p.student.groupName))).filter(Boolean) as string[]).sort((a, b) => a.localeCompare(b));
+                        const definedGroups = groups.filter(g => g.yearGroup === year && g.academicYear === selectedAcademicYear).map(g => g.name);
+                        const studentGroups = Array.from(new Set(yearStudents.map(p => p.student.groupName))).filter(Boolean);
+                        const yearGroups = Array.from(new Set([...definedGroups, ...studentGroups])).sort();
                         
                         if (yearGroups.length === 0 && yearStudents.length === 0) return null;
                         
@@ -2860,14 +2116,13 @@ export default function App() {
                               <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                 <select 
                                   className="bg-transparent text-[8px] font-bold text-slate-400 uppercase tracking-tighter outline-none cursor-pointer hover:text-rose-500 transition-colors"
-                                  defaultValue=""
                                   onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val) {
-                                      handleDeleteClass(year, val);
-                                      e.target.value = ''; // Reset after delete
+                                    if (e.target.value) {
+                                      handleDeleteClass(year, e.target.value);
+                                      e.target.value = ''; // Reset
                                     }
                                   }}
+                                  value=""
                                 >
                                   <option value="" disabled>Bulk Delete Class</option>
                                   {yearGroups.map(g => (
@@ -2877,9 +2132,7 @@ export default function App() {
                               </div>
                             </div>
                             {isYearExpanded && yearGroups.map(groupName => {
-                              const groupStudents = yearStudents
-                                .filter(p => p.student.groupName === groupName)
-                                .sort((a, b) => a.student.name.localeCompare(b.student.name));
+                              const groupStudents = yearStudents.filter(p => p.student.groupName === groupName);
                               const groupSectionId = `group-${year}-${groupName}`;
                               const isGroupExpanded = expandedSections.has(groupSectionId);
 
@@ -2896,7 +2149,7 @@ export default function App() {
                                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                       {groupStudents.length > 0 && (
                                         <button 
-                                          onClick={() => handleDeleteClass(year as YearGroup, groupName as string)}
+                                          onClick={() => handleDeleteClass(year, groupName)}
                                           className="opacity-0 group-hover/header:opacity-100 flex items-center gap-1 text-[8px] font-bold text-rose-500 hover:text-rose-600 transition-all"
                                           title="Delete all students in this class"
                                         >
@@ -2910,48 +2163,37 @@ export default function App() {
                                     </div>
                                   </div>
                                   {isGroupExpanded && groupStudents.map((p) => (
-                                    <div
+                                    <button
                                       key={p.student.id}
                                       onClick={() => setSelectedStudentId(p.student.id)}
-                                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between group cursor-pointer ${
+                                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
                                         selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
                                       }`}
                                     >
                                       <div className="flex items-center gap-2">
-                                        <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
+                                        <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] ${
                                           selectedStudentId === p.student.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
                                         }`}>
-                                          {p.student.name.split(' ').map((n: string) => n[0]).join('')}
+                                          {p.student.name.split(' ').map(n => n[0]).join('')}
                                         </div>
-                                        <div className="min-w-0">
-                                          <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">{p.student.name}</p>
-                                          {/* Show HL/SL summary for IB students */}
-                                          {(p.student as any).subjectLevels && Object.keys((p.student as any).subjectLevels).length > 0 && (
-                                            <p className="text-[8px] text-slate-400 truncate max-w-[100px]">
-                                              {Object.entries((p.student as any).subjectLevels as Record<string,string>)
-                                                .map(([s, l]) => `${s.split(' ')[0]} ${l}`).join(' · ')}
-                                            </p>
-                                          )}
-                                        </div>
+                                        <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">{p.student.name}</p>
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         <span className={`text-[8px] px-1 py-0.5 rounded-full border font-bold ${getStatusColor(p.status)}`}>
-                                          {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
+                                          {p.averagePercentage.toFixed(0)}%
                                         </span>
                                         {getTrendIcon(p.trend)}
-                                        <div
+                                        <button 
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleDeleteStudent(p.student.id);
                                           }}
-                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity cursor-pointer"
-                                          role="button"
-                                          title="Delete student"
+                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
                                         >
                                           <Trash2 className="w-3 h-3" />
-                                        </div>
+                                        </button>
                                       </div>
-                                    </div>
+                                    </button>
                                   ))}
                                 </div>
                               );
@@ -2973,34 +2215,7 @@ export default function App() {
                           <div className="flex items-center justify-between mb-8">
                             <div>
                               <h2 className="text-2xl font-bold text-slate-900">{p.student.name}</h2>
-                              <p className="text-slate-500">
-                                {formatYearGroup(p.student.yearGroup)} • {p.student.groupName} • {' '}
-                                {(p as any).hasData 
-                                  ? <>Overall Average: <span className="font-bold text-slate-700">{p.averagePercentage.toFixed(1)}%</span></>
-                                  : <span className="text-slate-400 italic">No assessments sat yet</span>
-                                }
-                                {(p as any).absentCount > 0 && (
-                                  <span className="ml-2 text-[11px] text-rose-400">• {(p as any).absentCount} absent</span>
-                                )}
-                              </p>
-                              {/* HL/SL subject level badges for IB students */}
-                              {(p.student as any).subjectLevels && Object.keys((p.student as any).subjectLevels).length > 0 && (
-                                <div className="flex flex-wrap gap-1.5 mt-2">
-                                  {Object.entries((p.student as any).subjectLevels as Record<string, string>).map(([subject, level]) => (
-                                    <span 
-                                      key={subject}
-                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                        level === 'HL' 
-                                          ? 'bg-violet-50 text-violet-700 border-violet-200' 
-                                          : 'bg-sky-50 text-sky-700 border-sky-200'
-                                      }`}
-                                    >
-                                      <span style={{ color: SUBJECT_COLORS[subject] || '#6366f1' }}>●</span>
-                                      {subject} <span className="opacity-75">{level}</span>
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              <p className="text-slate-500">{formatYearGroup(p.student.yearGroup)} • Overall Average: {p.averagePercentage.toFixed(1)}%</p>
                             </div>
                           </div>
 
@@ -3180,12 +2395,8 @@ export default function App() {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => {
-                            if (window.confirm(`Delete "${assessment.name}"? This will also remove all ${marks.filter(m => m.assessmentId === assessment.id).length} marks for this assessment. This cannot be undone.`)) {
-                              handleDeleteAssessment(assessment.id);
-                            }
-                          }}
-                          className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                          onClick={() => handleDeleteAssessment(assessment.id)}
+                          className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
                           title="Delete Assessment"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -3193,58 +2404,26 @@ export default function App() {
                       </div>
                     </div>
                     
-                    {(() => {
-                      const allAssessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
-                      const absentMarks = allAssessmentMarks.filter(m => (m as any).absent);
-                      // Only count students who actually sat the exam (not absent) for avg and marked count
-                      const assessmentMarks = allAssessmentMarks.filter(m => !(m as any).absent);
-                      const totalStudents = students.filter(s => String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === assessment.academicYear).length;
-                      const markedCount = assessmentMarks.length;
-                      const avg = markedCount > 0
-                        ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / markedCount
-                        : null;
-                      // unmarked = students with no mark record at all (not absent, not entered)
-                      const unmarkedCount = totalStudents - allAssessmentMarks.length;
-                      return (
-                        <div className="mt-4 pt-4 border-t border-slate-50 space-y-3">
-                          <div className="grid grid-cols-3 gap-2 text-center">
-                            <div className="bg-slate-50 rounded-lg p-2">
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">Max Marks</p>
-                              <p className="text-sm font-bold text-slate-900">{assessment.maxMarks}</p>
-                            </div>
-                            <div className={`rounded-lg p-2 ${avg !== null ? 'bg-indigo-50' : 'bg-slate-50'}`}>
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">Class Avg</p>
-                              <p className={`text-sm font-bold ${avg !== null ? 'text-indigo-600' : 'text-slate-400'}`}>
-                                {avg !== null ? `${avg.toFixed(1)}%` : '—'}
-                              </p>
-                            </div>
-                            <div className={`rounded-lg p-2 ${unmarkedCount > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}>
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">Marked</p>
-                              <p className={`text-sm font-bold ${unmarkedCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                {markedCount}/{totalStudents}
-                              </p>
-                              {absentMarks.length > 0 && (
-                                <p className="text-[8px] text-rose-400 font-bold mt-0.5">{absentMarks.length} absent</p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <button 
-                              onClick={() => setShowMarksModal(assessment.id)}
-                              className="flex-1 text-indigo-600 text-sm font-bold flex items-center justify-center gap-1 hover:gap-2 transition-all"
-                            >
-                              Manage Marks <ChevronRight className="w-4 h-4" />
-                            </button>
-                            <button 
-                              onClick={() => setShowPaperGradingModal(assessment.id)}
-                              className="flex-1 text-emerald-600 text-sm font-bold flex items-center justify-center gap-1 hover:gap-2 transition-all"
-                            >
-                              Grade by Question <FileText className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    <div className="flex items-center justify-between mt-6 pt-4 border-t border-slate-50">
+                      <div className="text-sm">
+                        <span className="text-slate-500">Max Marks:</span>
+                        <span className="ml-1 font-bold text-slate-900">{assessment.maxMarks}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={() => setShowMarksModal(assessment.id)}
+                          className="text-indigo-600 text-sm font-bold flex items-center gap-1 hover:gap-2 transition-all"
+                        >
+                          Manage Marks <ChevronRight className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => setShowPaperGradingModal(assessment.id)}
+                          className="text-emerald-600 text-sm font-bold flex items-center gap-1 hover:gap-2 transition-all"
+                        >
+                          Grade by Question <FileText className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -3640,12 +2819,7 @@ export default function App() {
                     onChange={e => {
                       const val = e.target.value;
                       const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
-                      // Use String() comparison to avoid type mismatch, and fall back to student-derived groups
-                      const groupsForYear = Array.from(new Set([
-                        ...groups.filter(g => String(g.yearGroup) === String(year) && g.academicYear === selectedAcademicYear).map(g => g.name),
-                        ...students.filter(s => String(s.yearGroup) === String(year) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
-                      ])).sort();
-                      const firstGroup = groupsForYear[0] || '';
+                      const firstGroup = groups.find(g => g.yearGroup === year)?.name || '';
                       setNewStudent({...newStudent, yearGroup: year, groupName: firstGroup});
                     }}
                   >
@@ -3656,98 +2830,18 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Group / Class</label>
-                  {(() => {
-                    // Build groups list from both Firestore groups collection AND existing students
-                    // Uses String() comparison to handle number/string type mismatches
-                    const groupsForYear = Array.from(new Set([
-                      ...groups.filter(g => String(g.yearGroup) === String(newStudent.yearGroup) && g.academicYear === selectedAcademicYear).map(g => g.name),
-                      ...students.filter(s => String(s.yearGroup) === String(newStudent.yearGroup) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
-                    ])).sort();
-                    return (
-                      <select 
-                        required
-                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                        value={newStudent.groupName}
-                        onChange={e => setNewStudent({...newStudent, groupName: e.target.value})}
-                      >
-                        <option value="" disabled>Select Group</option>
-                        {groupsForYear.map(name => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                        {groupsForYear.length === 0 && (
-                          <option disabled>No groups found — import students first</option>
-                        )}
-                      </select>
-                    );
-                  })()}
+                  <select 
+                    required
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newStudent.groupName}
+                    onChange={e => setNewStudent({...newStudent, groupName: e.target.value})}
+                  >
+                    <option value="" disabled>Select Group</option>
+                    {groups.filter(g => g.yearGroup === newStudent.yearGroup && g.academicYear === selectedAcademicYear).map(g => (
+                      <option key={g.id} value={g.name}>{g.name}</option>
+                    ))}
+                  </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Subjects</label>
-                  <div className="flex flex-wrap gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
-                    {(SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map(subject => {
-                      const currentSubjects: string[] = (newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || [];
-                      const isSelected = currentSubjects.includes(subject);
-                      return (
-                        <button
-                          key={subject}
-                          type="button"
-                          onClick={() => {
-                            const current: string[] = (newStudent as any).subjects || [...(SUBJECTS_BY_YEAR[newStudent.yearGroup] || [])];
-                            const updated = isSelected ? current.filter(s => s !== subject) : [...current, subject];
-                            setNewStudent({...newStudent, subjects: updated} as any);
-                          }}
-                          className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${
-                            isSelected 
-                              ? 'bg-indigo-600 text-white border-indigo-600' 
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
-                          }`}
-                        >
-                          {subject}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[10px] text-slate-400 mt-1">Click to toggle — all selected by default</p>
-                </div>
-                {/* HL/SL level selector — only for IB years */}
-                {(newStudent.yearGroup === '12 IB' || newStudent.yearGroup === '13 IB') && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Subject Levels (HL / SL)</label>
-                    <div className="space-y-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
-                      {((newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map((subject: string) => {
-                        const subjectLevels = (newStudent as any).subjectLevels || {};
-                        const currentLevel = subjectLevels[subject] || 'SL';
-                        return (
-                          <div key={subject} className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-700" style={{ color: SUBJECT_COLORS[subject] }}>
-                              {subject}
-                            </span>
-                            <div className="flex gap-1">
-                              {(['HL', 'SL'] as const).map(level => (
-                                <button
-                                  key={level}
-                                  type="button"
-                                  onClick={() => {
-                                    const existing = (newStudent as any).subjectLevels || {};
-                                    setNewStudent({ ...newStudent, subjectLevels: { ...existing, [subject]: level } } as any);
-                                  }}
-                                  className={`px-3 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
-                                    currentLevel === level
-                                      ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
-                                      : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
-                                  }`}
-                                >
-                                  {level}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1">Default is SL — click HL to change</p>
-                  </div>
-                )}
                 <div className="flex gap-3 pt-4">
                   <button type="button" onClick={() => setShowStudentModal(false)} className="btn-secondary flex-1">Cancel</button>
                   <button type="submit" className="btn-primary flex-1">Add Student</button>
@@ -3791,20 +2885,15 @@ export default function App() {
                         onChange={(e) => setMarksGroupFilter(e.target.value)}
                       >
                         <option value="all">All Groups</option>
-                        {(() => {
-                          const assessment = assessments.find(a => a.id === showMarksModal);
-                          // Only show groups that actually have students (prevents ghost groups)
-                          const fromStudents = students
-                            .filter(s => assessment 
-                              ? (String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === selectedAcademicYear)
-                              : s.academicYear === selectedAcademicYear)
-                            .map(s => s.groupName)
-                            .filter(Boolean);
-                          const allGroups = Array.from(new Set(fromStudents)).sort();
-                          return allGroups.map(name => (
-                            <option key={name} value={name}>{name}</option>
-                          ));
-                        })()}
+                        {groups
+                          .filter(g => {
+                            const assessment = assessments.find(a => a.id === showMarksModal);
+                            return assessment ? (g.yearGroup === assessment.yearGroup && g.academicYear === selectedAcademicYear) : g.academicYear === selectedAcademicYear;
+                          })
+                          .map(g => (
+                            <option key={g.id} value={g.name}>{g.name}</option>
+                          ))
+                        }
                       </select>
                     </div>
                   </div>
@@ -3813,9 +2902,8 @@ export default function App() {
                       const assessment = assessments.find(a => a.id === showMarksModal);
                       const relevantStudents = students.filter(s => {
                         const matchesYear = assessment ? String(s.yearGroup) === String(assessment.yearGroup) : true;
-                        const matchesAcademicYear = s.academicYear === selectedAcademicYear;
                         const matchesGroup = marksGroupFilter === 'all' || s.groupName === marksGroupFilter;
-                        return matchesYear && matchesAcademicYear && matchesGroup;
+                        return matchesYear && matchesGroup;
                       });
                       const groupNames = Array.from(new Set(relevantStudents.map(s => s.groupName))).sort();
 
@@ -3828,77 +2916,28 @@ export default function App() {
                           <div key={groupName} className="mb-6">
                             <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-2">
                               <h5 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">Group {groupName || 'Unassigned'}</h5>
-                              <div className="flex items-center gap-2">
-                                {(() => {
-                                  const unmarked = groupStudents.filter(s => !marks.find(m => m.studentId === s.id && m.assessmentId === showMarksModal)).length;
-                                  return unmarked > 0 ? (
-                                    <span className="text-[9px] font-bold text-amber-500">{unmarked} unmarked</span>
-                                  ) : (
-                                    <span className="text-[9px] font-bold text-emerald-500">All marked ✓</span>
-                                  );
-                                })()}
-                                <span className="text-[9px] text-slate-400 font-bold">{groupStudents.length} students</span>
-                              </div>
+                              <span className="text-[9px] text-slate-400 font-bold">{groupStudents.length} Students</span>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                               {groupStudents.map(student => {
                                 const mark = marks.find(m => m.studentId === student.id && m.assessmentId === showMarksModal);
                                 return (
-                                  <div key={student.id} className={`flex items-center justify-between p-1.5 rounded-lg border shadow-sm ${mark === undefined ? 'bg-amber-50 border-amber-100' : 'bg-white border-slate-100'}`}>
+                                  <div key={student.id} className="flex items-center justify-between p-1.5 bg-white rounded-lg border border-slate-100 shadow-sm">
                                     <div className="min-w-0 flex-1 mr-2">
-                                      <div className="flex items-center gap-1 flex-wrap">
-                                        <p className="font-bold text-slate-900 text-[11px] truncate">{student.name}</p>
-                                        {/* Show HL/SL badge for the subject of this assessment */}
-                                        {(() => {
-                                          const assessmentSubject = assessments.find(a => a.id === showMarksModal)?.subject;
-                                          const level = assessmentSubject && (student as any).subjectLevels?.[assessmentSubject];
-                                          if (!level) return null;
-                                          return (
-                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border flex-shrink-0 ${
-                                              level === 'HL' ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-sky-50 text-sky-700 border-sky-200'
-                                            }`}>{level}</span>
-                                          );
-                                        })()}
-                                      </div>
-                                      {mark === undefined && (
-                                        <span className="text-[8px] font-bold text-amber-500 uppercase tracking-wide">Not marked</span>
-                                      )}
-                                      {(mark as any)?.absent && (
-                                        <span className="text-[8px] font-bold text-rose-500 uppercase tracking-wide">Absent — excluded from avg</span>
-                                      )}
+                                      <p className="font-bold text-slate-900 text-[11px] truncate">{student.name}</p>
                                     </div>
                                     <div className="flex items-center gap-1.5">
-                                      {/* Absent toggle */}
-                                      <button
-                                        type="button"
-                                        title={(mark as any)?.absent ? 'Mark as present' : 'Mark as absent'}
-                                        onClick={() => handleMarkAbsent(student.id, showMarksModal, !(mark as any)?.absent)}
-                                        className={`text-[8px] font-bold px-1.5 py-0.5 rounded border transition-all ${
-                                          (mark as any)?.absent
-                                            ? 'bg-rose-500 text-white border-rose-500'
-                                            : 'bg-white text-slate-300 border-slate-200 hover:text-rose-400 hover:border-rose-200'
-                                        }`}
-                                      >
-                                        ABS
-                                      </button>
                                       <input 
                                         type="number" 
                                         placeholder="Score"
-                                        disabled={(mark as any)?.absent}
-                                        className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
-                                          (mark as any)?.absent
-                                            ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
-                                            : mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'
-                                        }`}
-                                        value={(mark as any)?.absent ? '' : (mark?.score ?? '')}
+                                        className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500"
+                                        value={mark?.score ?? ''}
                                         min="0"
                                         max={assessment?.maxMarks || 100}
                                         onChange={e => handleUpdateMark(student.id, showMarksModal, parseFloat(e.target.value) || 0)}
                                       />
-                                      <span className={`text-[9px] font-bold w-7 text-right ${
-                                        (mark as any)?.absent ? 'text-rose-400' : mark === undefined ? 'text-amber-400' : 'text-slate-400'
-                                      }`}>
-                                        {(mark as any)?.absent ? 'ABS' : mark !== undefined ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '—'}
+                                      <span className="text-[9px] font-bold text-slate-400 w-7 text-right">
+                                        {mark ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '-%'}
                                       </span>
                                     </div>
                                   </div>
@@ -4290,19 +3329,13 @@ export default function App() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Class Name</label>
-                    {importPreview && importPreview.groups && importPreview.groups.length > 0 ? (
-                      <div className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-xl text-green-700 font-bold text-sm flex items-center gap-2">
-                        <span>✓ Auto-detected: {importPreview.groups.join(', ')}</span>
-                      </div>
-                    ) : (
-                      <input 
-                        type="text"
-                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
-                        value={importConfig.groupName}
-                        onChange={e => setImportConfig({ ...importConfig, groupName: e.target.value })}
-                        placeholder="e.g. 10A"
-                      />
-                    )}
+                    <input 
+                      type="text"
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
+                      value={importConfig.groupName}
+                      onChange={e => setImportConfig({ ...importConfig, groupName: e.target.value })}
+                      placeholder="e.g. 10A"
+                    />
                   </div>
                 </div>
 
@@ -4356,104 +3389,21 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Preview panel */}
-              {importPreview && (
-                <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl space-y-3">
-                  <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide">Import Preview</p>
-                  <div className="grid grid-cols-2 gap-3 text-center">
-                    <div className="bg-white rounded-lg p-2 border border-indigo-100">
-                      <p className="text-lg font-bold text-indigo-600">{importPreview.students}</p>
-                      <p className="text-[10px] text-slate-500">Students</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-2 border border-indigo-100">
-                      <p className="text-lg font-bold text-indigo-600">{importPreview.marks}</p>
-                      <p className="text-[10px] text-slate-500">Marks</p>
-                    </div>
-                  </div>
-                  {importPreview.groups && importPreview.groups.length > 0 && (
-                    <div className="bg-white rounded-lg p-2 border border-green-200">
-                      <p className="text-[10px] font-bold text-green-700 mb-1">GROUPS DETECTED</p>
-                      <div className="flex flex-wrap gap-1">
-                        {importPreview.groups.map(g => (
-                          <span key={g} className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-bold">{g}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {Object.keys(importColumnSubjects).length > 0 ? (
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-500 mb-1.5 uppercase tracking-wide">
-                        Assessments detected — assign a subject to each:
-                      </p>
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {Object.entries(importColumnSubjects).map(([col, subject]) => {
-                          // Parse name and maxMarks from column header for display
-                          const marksMatch = col.match(/\((\d+)\)/);
-                          const maxMarks = marksMatch ? parseInt(marksMatch[1]) : importConfig.maxMarks;
-                          let displayName = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
-                          // Strip subject suffix if auto-detected
-                          const dashMatch = displayName.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-                          if (dashMatch) displayName = dashMatch[1].trim();
-                          return (
-                            <div key={col} className="flex items-center gap-2 bg-white rounded-lg px-2 py-1.5 border border-indigo-100">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[11px] font-bold text-slate-800 truncate">{displayName}</p>
-                                <p className="text-[9px] text-slate-400">{maxMarks} marks</p>
-                              </div>
-                              <select
-                                className={`text-[10px] font-bold border rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400 ${
-                                  !subject ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                                }`}
-                                value={subject}
-                                onChange={e => setImportColumnSubjects(prev => ({ ...prev, [col]: e.target.value }))}
-                              >
-                                <option value="">— pick subject —</option>
-                                {SUBJECTS_BY_YEAR[importConfig.yearGroup].map(s => (
-                                  <option key={s} value={s}>{s}</option>
-                                ))}
-                              </select>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {Object.values(importColumnSubjects).some(s => !s) && (
-                        <p className="text-[10px] text-amber-600 mt-1.5 font-medium">
-                          ⚠ Assign a subject to every assessment before importing.
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-amber-600 bg-amber-50 px-3 py-2 rounded-lg border border-amber-100">
-                      ⚠ No assessment columns detected. Check column headers include max marks e.g. "Test 1 (50)".
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="flex gap-3 mt-6">
+              <div className="flex gap-3 mt-8">
                 <button 
-                  onClick={() => { setShowImportModal(false); setPendingImport(null); setImportPreview(null); }}
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setPendingImport(null);
+                  }}
                   className="btn-secondary flex-1"
                 >
                   Cancel
                 </button>
                 <button 
-                  onClick={previewImport}
-                  className="btn-secondary flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                  onClick={confirmImport}
+                  className="btn-primary flex-1"
                 >
-                  Preview
-                </button>
-                <button 
-                  onClick={() => { confirmImport(); }}
-                  className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                  disabled={
-                    !importPreview ||
-                    (Object.keys(importColumnSubjects).length > 0 &&
-                     Object.values(importColumnSubjects).some(s => !s))
-                  }
-                >
-                  Import
+                  Import {pendingImport?.data.length} Rows
                 </button>
               </div>
             </motion.div>
