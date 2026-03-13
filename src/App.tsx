@@ -274,26 +274,16 @@ export default function App() {
         await Promise.all([
           ...students.map(s => setDoc(doc(db, 'students', s.id), {
             ...s,
-            yearGroup: (s.yearGroup === '7' || s.yearGroup === 7) ? 7 :
-                       (s.yearGroup === '8' || s.yearGroup === 8) ? 8 :
-                       (s.yearGroup === '9' || s.yearGroup === 9) ? 9 :
-                       s.yearGroup
+            yearGroup: migrateYear(s.yearGroup)
           })),
           ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), {
             ...a,
-            yearGroup: (a.yearGroup === '7' || a.yearGroup === 7) ? 7 :
-                       (a.yearGroup === '8' || a.yearGroup === 8) ? 8 :
-                       (a.yearGroup === '9' || a.yearGroup === 9) ? 9 :
-                       a.yearGroup
+            yearGroup: migrateYear(a.yearGroup)
           })),
           ...marks.map(m => setDoc(doc(db, 'marks', m.id), m)),
           ...groups.map(g => setDoc(doc(db, 'groups', g.id), {
             ...g,
-            // Ensure yearGroup is always correct type: number for 7/8/9, string for IGCSE/IB
-            yearGroup: (g.yearGroup === '7' || g.yearGroup === 7) ? 7 :
-                       (g.yearGroup === '8' || g.yearGroup === 8) ? 8 :
-                       (g.yearGroup === '9' || g.yearGroup === 9) ? 9 :
-                       g.yearGroup
+            yearGroup: migrateYear(g.yearGroup)
           })),
           updateYearBoundaries(yearBoundaries)
         ]);
@@ -331,6 +321,18 @@ export default function App() {
     return typeof y === 'number' ? `Year ${y}` : y;
   };
 
+  const migrateYear = (y: any): YearGroup => {
+    if (y === 10 || y === '10') return '10 IGCSE';
+    if (y === 11 || y === '11') return '11 IGCSE';
+    if (y === 12 || y === '12') return '12 IB';
+    if (y === 13 || y === '13') return '13 IB';
+    // Normalise string "7","8","9" back to numbers as per YearGroup type
+    if (y === '7') return 7;
+    if (y === '8') return 8;
+    if (y === '9') return 9;
+    return y as YearGroup;
+  };
+
   // Helper for year group matching
   const matchesYearFilter = (itemYear: YearGroup, filter: YearGroup | 'all' | 'IGCSE_ALL' | 'IB_ALL') => {
     if (filter === 'all') return true;
@@ -346,18 +348,6 @@ export default function App() {
 
   // Data Migration for old year formats
   useEffect(() => {
-    const migrateYear = (y: any): YearGroup => {
-      if (y === 10 || y === '10') return '10 IGCSE';
-      if (y === 11 || y === '11') return '11 IGCSE';
-      if (y === 12 || y === '12') return '12 IB';
-      if (y === 13 || y === '13') return '13 IB';
-      // Normalise string "7","8","9" back to numbers as per YearGroup type
-      if (y === '7') return 7;
-      if (y === '8') return 8;
-      if (y === '9') return 9;
-      return y as YearGroup;
-    };
-
     const migratedStudents = students.map(s => ({ ...s, yearGroup: migrateYear(s.yearGroup) }));
     if (JSON.stringify(migratedStudents) !== JSON.stringify(students)) {
       setStudents(migratedStudents);
@@ -2779,7 +2769,7 @@ export default function App() {
                                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                       {groupStudents.length > 0 && (
                                         <button 
-                                          onClick={() => handleDeleteClass(year, groupName)}
+                                          onClick={() => handleDeleteClass(year as YearGroup, groupName as string)}
                                           className="opacity-0 group-hover/header:opacity-100 flex items-center gap-1 text-[8px] font-bold text-rose-500 hover:text-rose-600 transition-all"
                                           title="Delete all students in this class"
                                         >
