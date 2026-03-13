@@ -2985,7 +2985,12 @@ export default function App() {
                     onChange={e => {
                       const val = e.target.value;
                       const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
-                      const firstGroup = groups.find(g => g.yearGroup === year)?.name || '';
+                      // Use String() comparison to avoid type mismatch, and fall back to student-derived groups
+                      const groupsForYear = Array.from(new Set([
+                        ...groups.filter(g => String(g.yearGroup) === String(year) && g.academicYear === selectedAcademicYear).map(g => g.name),
+                        ...students.filter(s => String(s.yearGroup) === String(year) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
+                      ])).sort();
+                      const firstGroup = groupsForYear[0] || '';
                       setNewStudent({...newStudent, yearGroup: year, groupName: firstGroup});
                     }}
                   >
@@ -2996,17 +3001,30 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Group / Class</label>
-                  <select 
-                    required
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={newStudent.groupName}
-                    onChange={e => setNewStudent({...newStudent, groupName: e.target.value})}
-                  >
-                    <option value="" disabled>Select Group</option>
-                    {groups.filter(g => g.yearGroup === newStudent.yearGroup && g.academicYear === selectedAcademicYear).map(g => (
-                      <option key={g.id} value={g.name}>{g.name}</option>
-                    ))}
-                  </select>
+                  {(() => {
+                    // Build groups list from both Firestore groups collection AND existing students
+                    // Uses String() comparison to handle number/string type mismatches
+                    const groupsForYear = Array.from(new Set([
+                      ...groups.filter(g => String(g.yearGroup) === String(newStudent.yearGroup) && g.academicYear === selectedAcademicYear).map(g => g.name),
+                      ...students.filter(s => String(s.yearGroup) === String(newStudent.yearGroup) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
+                    ])).sort();
+                    return (
+                      <select 
+                        required
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={newStudent.groupName}
+                        onChange={e => setNewStudent({...newStudent, groupName: e.target.value})}
+                      >
+                        <option value="" disabled>Select Group</option>
+                        {groupsForYear.map(name => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                        {groupsForYear.length === 0 && (
+                          <option disabled>No groups found — import students first</option>
+                        )}
+                      </select>
+                    );
+                  })()}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Subjects</label>
