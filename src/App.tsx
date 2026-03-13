@@ -1906,10 +1906,22 @@ export default function App() {
       if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
         colSubjects[col] = allSubjects.find(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())!;
       } else {
-        colSubjects[col] = ''; // needs user to assign
+        // Fall back to the subject already selected in the import config
+        colSubjects[col] = defaultSubject || '';
       }
     });
     setImportColumnSubjects(colSubjects);
+
+    // If no Group column found, try to extract group name from filename
+    // e.g. "10S_CS_2026" -> "10S", "10R_2026" -> "10R"
+    if (detectedGroups.size === 0 && pendingImport?.fileName) {
+      const fnMatch = pendingImport.fileName.match(/^([A-Za-z0-9]+)/);
+      if (fnMatch && fnMatch[1] && fnMatch[1].length <= 6) {
+        detectedGroups.add(fnMatch[1]);
+        // Also update the importConfig groupName to the extracted value
+        setImportConfig(prev => ({ ...prev, groupName: fnMatch[1] }));
+      }
+    }
 
     setImportPreview({
       assessments: assessmentNames,
