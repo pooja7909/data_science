@@ -596,9 +596,13 @@ export default function App() {
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
     
     const processData = (data: any[][], sheetName?: string) => {
-      // Find header row index (row containing 'Surname')
+      // Find header row index (row containing 'Surname', 'Last Name', 'Forename', or 'First Name')
       const headerIndex = data.findIndex(row => 
-        row.some(cell => typeof cell === 'string' && cell.toLowerCase().includes('surname'))
+        row.some(cell => {
+          if (typeof cell !== 'string') return false;
+          const c = cell.toLowerCase();
+          return c.includes('surname') || c.includes('last name') || c.includes('forename') || c.includes('first name');
+        })
       );
       
       if (headerIndex === -1) {
@@ -617,14 +621,39 @@ export default function App() {
       }
 
       // Map column indices
-      const surnameIdx = headers.findIndex(h => typeof h === 'string' && h.toLowerCase().includes('surname'));
-      const forenameIdx = headers.findIndex(h => typeof h === 'string' && h.toLowerCase().includes('forename'));
-      const yearIdx = headers.findIndex(h => typeof h === 'string' && h.toLowerCase().includes('year'));
+      const surnameIdx = headers.findIndex(h => {
+        if (typeof h !== 'string') return false;
+        const c = h.toLowerCase();
+        return c.includes('surname') || c.includes('last name');
+      });
+      const forenameIdx = headers.findIndex(h => {
+        if (typeof h !== 'string') return false;
+        const c = h.toLowerCase();
+        return c.includes('forename') || c.includes('first name');
+      });
+      const yearIdx = headers.findIndex(h => {
+        if (typeof h !== 'string') return false;
+        const c = h.toLowerCase();
+        return c.includes('year');
+      });
       
+      const normalizeYearGroup = (val: any): YearGroup => {
+        if (!val) return 7;
+        const s = String(val).toLowerCase();
+        if (s.includes('10')) return '10 IGCSE';
+        if (s.includes('11')) return '11 IGCSE';
+        if (s.includes('12')) return '12 IB';
+        if (s.includes('13')) return '13 IB';
+        if (s.includes('7')) return 7;
+        if (s.includes('8')) return 8;
+        if (s.includes('9')) return 9;
+        return 7;
+      };
+
       return dataRows.map(row => ({
         id: Math.random().toString(36).substr(2, 9),
         name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
-        yearGroup: (row[yearIdx] || 7) as YearGroup,
+        yearGroup: normalizeYearGroup(row[yearIdx]),
         groupName: guessedGroup || '',
         academicYear: selectedAcademicYear
       })).filter(s => s.name !== '' && s.name !== ' ');
@@ -654,7 +683,13 @@ export default function App() {
         header: false,
         skipEmptyLines: true,
         complete: (results) => {
-          processData(results.data as any[][]);
+          const allStudents = processData(results.data as any[][]);
+          if (allStudents.length > 0) {
+            setStudents(prev => [...prev, ...allStudents]);
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 3000);
+          }
+          e.target.value = '';
         }
       });
     }
@@ -1813,7 +1848,6 @@ export default function App() {
                     className="btn-primary w-full flex items-center justify-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
-                    {/* Test comment */}
                     Add Student
                   </button>
                   <label className="btn-secondary w-full flex items-center justify-center gap-2 cursor-pointer">
@@ -1890,7 +1924,6 @@ export default function App() {
                                             e.stopPropagation();
                                             if (confirm('Are you sure you want to delete this student?')) {
                                               setStudents(prev => prev.filter(s => s.id !== p.student.id));
-                                              setPerformances(prev => prev.filter(perf => perf.student.id !== p.student.id));
                                               setMarks(prev => prev.filter(m => m.studentId !== p.student.id));
                                             }
                                           }}
