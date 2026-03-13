@@ -373,7 +373,7 @@ export default function App() {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
-      const hasMarksInSubject = performanceSubjectFilter === 'all' || p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
+      const hasMarksInSubject = true;
       return matchesSearch && matchesYear && matchesGroup && hasMarksInSubject;
     });
   }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter]);
