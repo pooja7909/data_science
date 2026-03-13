@@ -2416,7 +2416,6 @@ setGroups(Array.isArray(groups) ? groups : []);
             )}
           </div>
         </motion.div>
-            </motion.div>
       )}
 
           {activeTab === 'performance' && (
@@ -2755,7 +2754,6 @@ setGroups(Array.isArray(groups) ? groups : []);
                   </div>
                 </div>
               </div>
-            </motion.div>
             </motion.div>
           )}
 
