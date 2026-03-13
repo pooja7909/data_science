@@ -143,7 +143,7 @@ export default function App() {
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [showMarksModal, setShowMarksModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importPreview, setImportPreview] = useState<{assessments: string[], students: number, marks: number} | null>(null);
+  const [importPreview, setImportPreview] = useState<{assessments: string[], students: number, marks: number, groups: string[]} | null>(null);
   const [importColumnSubjects, setImportColumnSubjects] = useState<Record<string, string>>({});
   const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string, sheetName?: string } | null>(null);
   const [importConfig, setImportConfig] = useState({ 
@@ -1334,7 +1334,7 @@ export default function App() {
           const allData: any[] = [];
           wb.SheetNames.forEach(wsname => {
             const ws = wb.Sheets[wsname];
-            const jsonData = XLSX.utils.sheet_to_json(ws);
+            const jsonData = XLSX.utils.sheet_to_json(ws, { defval: null });
             if (jsonData.length > 0) {
               jsonData.forEach((row: any) => {
                 row.__sheetName = wsname;
@@ -1752,6 +1752,9 @@ export default function App() {
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const scoreColumns = headers.filter(h => {
       if (metadataKeys.includes(normalizeKey(h))) return false;
+      // Include column if it has numeric data OR if header contains "(N)" max-marks pattern
+      // This catches assessment columns that are all-empty (e.g. not yet marked)
+      if (/\(\d+\)/.test(h)) return true;
       return data.some((row: any) => {
         const v = row[h];
         return v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()));
@@ -1780,6 +1783,7 @@ export default function App() {
     });
 
     const studentNames = new Set<string>();
+    const detectedGroups = new Set<string>();
     let markCount = 0;
     data.forEach((row: any) => {
       let nameRaw = ['studentname','name','student','fullname','pupil','pupilname']
@@ -1794,6 +1798,13 @@ export default function App() {
       }
       if (!nameRaw) return;
       studentNames.add(String(nameRaw).trim());
+      // Detect group from the Group column or sheet name
+      const groupKey = Object.keys(row).find((k: string) => {
+        const nk = normalizeKey(k);
+        return nk === 'group' || nk === 'class' || nk === 'groupname';
+      });
+      const groupVal = groupKey ? String(row[groupKey]).trim() : (row.__sheetName ? String(row.__sheetName).trim() : '');
+      if (groupVal && groupVal !== 'null' && groupVal !== 'undefined') detectedGroups.add(groupVal);
       scoreColumns.forEach(col => {
         const v = row[col];
         if (v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()))) markCount++;
@@ -1818,7 +1829,8 @@ export default function App() {
     setImportPreview({
       assessments: assessmentNames,
       students: studentNames.size,
-      marks: markCount
+      marks: markCount,
+      groups: Array.from(detectedGroups).sort()
     });
   };
 
@@ -4158,13 +4170,19 @@ export default function App() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Class Name</label>
-                    <input 
-                      type="text"
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
-                      value={importConfig.groupName}
-                      onChange={e => setImportConfig({ ...importConfig, groupName: e.target.value })}
-                      placeholder="e.g. 10A"
-                    />
+                    {importPreview && importPreview.groups && importPreview.groups.length > 0 ? (
+                      <div className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-xl text-green-700 font-bold text-sm flex items-center gap-2">
+                        <span>✓ Auto-detected: {importPreview.groups.join(', ')}</span>
+                      </div>
+                    ) : (
+                      <input 
+                        type="text"
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
+                        value={importConfig.groupName}
+                        onChange={e => setImportConfig({ ...importConfig, groupName: e.target.value })}
+                        placeholder="e.g. 10A"
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -4232,6 +4250,16 @@ export default function App() {
                       <p className="text-[10px] text-slate-500">Marks</p>
                     </div>
                   </div>
+                  {importPreview.groups && importPreview.groups.length > 0 && (
+                    <div className="bg-white rounded-lg p-2 border border-green-200">
+                      <p className="text-[10px] font-bold text-green-700 mb-1">GROUPS DETECTED</p>
+                      <div className="flex flex-wrap gap-1">
+                        {importPreview.groups.map(g => (
+                          <span key={g} className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-bold">{g}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {Object.keys(importColumnSubjects).length > 0 ? (
                     <div>
