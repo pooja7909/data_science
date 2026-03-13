@@ -1337,7 +1337,10 @@ export default function App() {
         
         setImportConfig({
           yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
-          groupName: fileName,
+          groupName: (() => {
+            const m = fileName.match(/^(\d{1,2}[A-Za-z]{1,4}|\d{1,2})/);
+            return (m && m[1]) ? m[1] : fileName;
+          })(),
           assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
           subject: SUBJECTS_BY_YEAR[(yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter][0],
           maxMarks: 100,
@@ -1801,6 +1804,7 @@ export default function App() {
     setShowImportModal(false);
     setPendingImport(null);
     setImportPreview(null);
+    setImportColumnSubjects({});
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 3000);
 
@@ -4441,7 +4445,7 @@ export default function App() {
                   Preview
                 </button>
                 <button 
-                  onClick={() => { confirmImport(); setImportPreview(null); setImportColumnSubjects({}); }}
+                  onClick={() => { confirmImport(); }}
                   className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                   disabled={
                     !importPreview ||
