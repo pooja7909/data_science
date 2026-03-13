@@ -245,10 +245,29 @@ export default function App() {
       try {
         // Save all students, assessments, marks, groups, and year boundaries to Firebase
         await Promise.all([
-          ...students.map(s => setDoc(doc(db, 'students', s.id), s)),
-          ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), a)),
+          ...students.map(s => setDoc(doc(db, 'students', s.id), {
+            ...s,
+            yearGroup: (s.yearGroup === '7' || s.yearGroup === 7) ? 7 :
+                       (s.yearGroup === '8' || s.yearGroup === 8) ? 8 :
+                       (s.yearGroup === '9' || s.yearGroup === 9) ? 9 :
+                       s.yearGroup
+          })),
+          ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), {
+            ...a,
+            yearGroup: (a.yearGroup === '7' || a.yearGroup === 7) ? 7 :
+                       (a.yearGroup === '8' || a.yearGroup === 8) ? 8 :
+                       (a.yearGroup === '9' || a.yearGroup === 9) ? 9 :
+                       a.yearGroup
+          })),
           ...marks.map(m => setDoc(doc(db, 'marks', m.id), m)),
-          ...groups.map(g => setDoc(doc(db, 'groups', g.id), g)),
+          ...groups.map(g => setDoc(doc(db, 'groups', g.id), {
+            ...g,
+            // Ensure yearGroup is always correct type: number for 7/8/9, string for IGCSE/IB
+            yearGroup: (g.yearGroup === '7' || g.yearGroup === 7) ? 7 :
+                       (g.yearGroup === '8' || g.yearGroup === 8) ? 8 :
+                       (g.yearGroup === '9' || g.yearGroup === 9) ? 9 :
+                       g.yearGroup
+          })),
           updateYearBoundaries(yearBoundaries)
         ]);
         console.log("Data saved successfully.");
@@ -305,6 +324,10 @@ export default function App() {
       if (y === 11 || y === '11') return '11 IGCSE';
       if (y === 12 || y === '12') return '12 IB';
       if (y === 13 || y === '13') return '13 IB';
+      // Normalise string "7","8","9" back to numbers as per YearGroup type
+      if (y === '7') return 7;
+      if (y === '8') return 8;
+      if (y === '9') return 9;
       return y as YearGroup;
     };
 
@@ -317,30 +340,36 @@ export default function App() {
     if (JSON.stringify(migratedAssessments) !== JSON.stringify(assessments)) {
       setAssessments(migratedAssessments);
     }
-  }, [students, assessments]);
+
+    // Also migrate groups yearGroup field
+    const migratedGroups = groups.map(g => ({ ...g, yearGroup: migrateYear(g.yearGroup) }));
+    if (JSON.stringify(migratedGroups) !== JSON.stringify(groups)) {
+      setGroups(migratedGroups);
+    }
+  }, [students, assessments, groups]);
 
   // Cleanup orphaned groups (groups with no students) from Firestore and local state
+  // Runs across ALL academic years so old ghost groups get purged regardless of selected year
   useEffect(() => {
     if (!hasLoaded || groups.length === 0) return;
+    // Build a key set from ALL students across all years
     const studentGroupKeys = new Set(
-      students
-        .filter(s => s.academicYear === selectedAcademicYear)
-        .map(s => `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
+      students.map(s => `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
     );
     const orphanedGroups = groups.filter(g => 
       !studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
     );
     if (orphanedGroups.length > 0) {
-      // Remove orphaned groups from local state silently
+      console.log(`Cleaning up ${orphanedGroups.length} orphaned group(s):`, orphanedGroups.map(g => g.name));
       setGroups(prev => prev.filter(g => 
         studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
       ));
-      // Also remove from Firestore
+      // Delete from Firestore permanently
       orphanedGroups.forEach(g => {
         deleteDoc(doc(db, 'groups', g.id)).catch(console.error);
       });
     }
-  }, [hasLoaded, students, groups, selectedAcademicYear]);
+  }, [hasLoaded, students, groups]);
 
   // Derived Data
   const performances = useMemo(() => {
