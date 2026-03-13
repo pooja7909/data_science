@@ -2345,7 +2345,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {assessments
-                  .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter))
+                  .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter) && (performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter))
                   .map(assessment => (
                   <div key={assessment.id} className="card p-6 hover:border-indigo-200 transition-colors group">
                     <div className="flex justify-between items-start mb-4">
