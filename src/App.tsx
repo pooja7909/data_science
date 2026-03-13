@@ -4246,8 +4246,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="card w-full max-w-md p-6"
+              className="card w-full max-w-md flex flex-col max-h-[90vh]"
             >
+              <div className="p-6 overflow-y-auto flex-1">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600">
                   <Upload className="w-6 h-6" />
@@ -4431,7 +4432,8 @@ export default function App() {
                 </div>
               )}
 
-              <div className="flex gap-3 mt-6">
+              </div>{/* end scrollable content */}
+              <div className="flex gap-3 p-6 pt-4 border-t border-slate-100">
                 <button 
                   onClick={() => { setShowImportModal(false); setPendingImport(null); setImportPreview(null); }}
                   className="btn-secondary flex-1"
