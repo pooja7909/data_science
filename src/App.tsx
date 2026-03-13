@@ -1818,10 +1818,12 @@ export default function App() {
     } else {
       alert('Import complete — no new data detected. Check that student names match exactly and column headers include max marks e.g. "Test 1 (50)".');
     }
+    } catch(e: any) { console.error('confirmImport error:', e); alert('Import error: ' + e.message); }
   };
 
   // Dry-run the import to show a preview of what will be created/updated
   const previewImport = () => {
+    try {
     if (!pendingImport) return;
     const { data } = pendingImport;
     const { yearGroup, subject: defaultSubject, maxMarks: defaultMaxMarks } = importConfig;
@@ -1933,6 +1935,7 @@ export default function App() {
       marks: markCount,
       groups: Array.from(detectedGroups).sort()
     });
+    } catch(e: any) { console.error('previewImport error:', e); alert('Preview error: ' + e.message); }
   };
 
   const handleAddAssessment = (e: React.FormEvent) => {
@@ -4241,13 +4244,8 @@ export default function App() {
           </div>
         )}
         {showImportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="card w-full max-w-md flex flex-col max-h-[90vh]"
-            >
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={e => e.stopPropagation()}>
+            <div className="card w-full max-w-md flex flex-col max-h-[90vh]">
               <div className="p-6 overflow-y-auto flex-1">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600">
@@ -4458,7 +4456,7 @@ export default function App() {
                   Import
                 </button>
               </div>
-            </motion.div>
+            </div>
           </div>
         )}
       </AnimatePresence>
