@@ -373,7 +373,7 @@ export default function App() {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
-      const hasMarksInSubject = true;
+      const hasMarksInSubject = performanceSubjectFilter === 'all' || p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
       return matchesSearch && matchesYear && matchesGroup && hasMarksInSubject;
     });
   }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter]);
@@ -677,7 +677,7 @@ export default function App() {
       try {
         setSaveStatus('saving');
         const studentsToDelete = students.filter(s => 
-          s.yearGroup === year && 
+          String(s.yearGroup) === String(year) && 
           s.groupName === groupName && 
           s.academicYear === selectedAcademicYear
         );
@@ -743,7 +743,7 @@ export default function App() {
           setGroups(prev => prev.filter(g => g.id !== groupId));
           
           // Clear groupName for students in this group
-          const studentsToUpdate = students.filter(s => s.groupName === group.name && s.yearGroup === group.yearGroup && s.academicYear === group.academicYear);
+          const studentsToUpdate = students.filter(s => s.groupName === group.name && String(s.yearGroup) === String(group.yearGroup) && s.academicYear === group.academicYear);
           await Promise.all(studentsToUpdate.map(s => updateDoc(doc(db, 'students', s.id), { groupName: '' })));
           setStudents(prev => prev.map(s => studentsToUpdate.find(stu => stu.id === s.id) ? { ...s, groupName: '' } : s));
         }
