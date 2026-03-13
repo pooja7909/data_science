@@ -216,12 +216,11 @@ export default function App() {
 
   // Auto-run preview when import modal opens so Import button is immediately available
   useEffect(() => {
-    if (showImportModal && pendingImport) {
-      // Small delay to let importConfig state settle before running preview
-      const t = setTimeout(() => previewImport(), 50);
-      return () => clearTimeout(t);
-    }
-  }, [showImportModal]);
+  if (showImportModal && pendingImport) {
+    const t = setTimeout(() => previewImport(), 50);
+    return () => clearTimeout(t);
+  }
+}, [showImportModal, pendingImport]);
 
   useEffect(() => {
     if (!showPaperGradingModal) setModalGroupFilter('all');
@@ -268,10 +267,10 @@ export default function App() {
           getYearBoundaries()
         ]);
         console.log("Data fetched:", { students, assessments, marks, groups, fetchedBoundaries });
-        setStudents(students || []);
-        setAssessments(assessments || []);
-        setMarks(marks || []);
-        setGroups(groups || []);
+        setStudents(Array.isArray(students) ? students : []);
+setAssessments(Array.isArray(assessments) ? assessments : []);
+setMarks(Array.isArray(marks) ? marks : []);
+setGroups(Array.isArray(groups) ? groups : []);
         if (fetchedBoundaries) {
           setYearBoundaries(fetchedBoundaries as Record<string, GradeBoundary[]>);
         }
@@ -288,8 +287,7 @@ export default function App() {
 
   // Save data when state changes
   useEffect(() => {
-    if (!hasLoaded || isFetching.current) return;
-
+   if (!hasLoaded || isFetching.current || isImporting.current) return;
     const saveData = async () => {
       console.log("Saving data to Firebase...");
       try {
@@ -1387,7 +1385,10 @@ export default function App() {
   };
 
   const confirmImport = async () => {
-    if (!pendingImport) return;
+   if (!pendingImport || !pendingImport.data) {
+  console.error("Import failed: no data");
+  return;
+}
 
     const { data, sheetName: defaultSheetName } = pendingImport;
     const { yearGroup, groupName, assessmentName: defaultAssessmentName, subject: defaultSubject, maxMarks: defaultMaxMarks, date: defaultDate } = importConfig;
@@ -1821,8 +1822,12 @@ export default function App() {
   };
 
   // Dry-run the import to show a preview of what will be created/updated
-  const previewImport = () => {
-    if (!pendingImport) return;
+ const previewImport = () => {
+  try {
+    console.log("Preview triggered:", pendingImport);
+
+    if (!pendingImport || !importConfig) return;
+    
     const { data } = pendingImport;
     const { yearGroup, subject: defaultSubject, maxMarks: defaultMaxMarks } = importConfig;
 
@@ -4241,7 +4246,10 @@ export default function App() {
           </div>
         )}
         {showImportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={e => e.stopPropagation()}>
+         <div 
+  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+  onClick={(e) => e.stopPropagation()}
+>
             <div className="card w-full max-w-md flex flex-col max-h-[90vh]">
               <div className="p-6 overflow-y-auto flex-1">
               <div className="flex items-center gap-3 mb-6">
@@ -4442,14 +4450,16 @@ export default function App() {
                   Preview
                 </button>
                 <button 
-                  onClick={() => { console.log('Import clicked'); confirmImport().catch(e => { console.error('Import failed:', e); alert('Import error: ' + e.message); }); }}
-                  className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                  disabled={
-                    !importPreview ||
-                    (Object.keys(importColumnSubjects).length > 0 &&
-                     Object.values(importColumnSubjects).some(s => !s))
-                  }
-                >
+  onClick={() => { 
+    console.log('Import clicked'); 
+    confirmImport().catch(e => { 
+      console.error('Import failed:', e); 
+      alert('Import error: ' + e.message); 
+    }); 
+  }}
+  className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+  disabled={!importPreview}
+>
                   Import
                 </button>
               </div>
