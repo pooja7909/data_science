@@ -926,14 +926,32 @@ export default function App() {
       
       const normalizeYearGroup = (val: any): YearGroup => {
         if (!val) return 7;
-        const s = String(val).toLowerCase();
-        if (s.includes('10')) return '10 IGCSE';
-        if (s.includes('11')) return '11 IGCSE';
-        if (s.includes('12')) return '12 IB';
-        if (s.includes('13')) return '13 IB';
-        if (s.includes('7')) return 7;
-        if (s.includes('8')) return 8;
-        if (s.includes('9')) return 9;
+        const s = String(val).trim();
+        const num = parseInt(s);
+        // Check explicit IGCSE/IB strings first
+        if (s.toLowerCase().includes('igcse') || num === 10 || num === 11) {
+          if (num === 11 || s.includes('11')) return '11 IGCSE';
+          return '10 IGCSE';
+        }
+        if (s.toLowerCase().includes('ib') || num === 12 || num === 13) {
+          if (num === 13 || s.includes('13')) return '13 IB';
+          return '12 IB';
+        }
+        if (num === 7 || s === '7') return 7;
+        if (num === 8 || s === '8') return 8;
+        if (num === 9 || s === '9') return 9;
+        // For plain numeric strings like "10 IGCSE", "11 IGCSE" — extract leading number
+        const match = s.match(/^(\d+)/);
+        if (match) {
+          const n = parseInt(match[1]);
+          if (n === 7) return 7;
+          if (n === 8) return 8;
+          if (n === 9) return 9;
+          if (n === 10) return '10 IGCSE';
+          if (n === 11) return '11 IGCSE';
+          if (n === 12) return '12 IB';
+          if (n === 13) return '13 IB';
+        }
         return 7;
       };
 
@@ -1312,7 +1330,7 @@ export default function App() {
         reader.onload = (evt) => {
           const data = evt.target?.result;
           const wb = XLSX.read(data, { type: 'array' });
-          
+
           const allData: any[] = [];
           wb.SheetNames.forEach(wsname => {
             const ws = wb.Sheets[wsname];
@@ -1324,7 +1342,7 @@ export default function App() {
               allData.push(...jsonData);
             }
           });
-          
+
           processData(allData, wb.SheetNames[0]);
         };
         reader.readAsArrayBuffer(file);
@@ -1471,9 +1489,49 @@ export default function App() {
 
       const rowSheetName = row.__sheetName || defaultSheetName;
 
+      // Derive the year group: prefer the import config (set by user in the modal),
+      // but also accept the per-row Year Group cell as a cross-check.
+      // If the row's Year Group cell disagrees with the import config, trust the import config —
+      // this protects against data-entry errors like "11 IGCSE", "12 IGCSE" appearing in a 10R sheet.
+      const rowYearGroupRaw = findValue(row, ['yeargroup', 'year group', 'year']);
+      const rowYearGroup = (() => {
+        if (!rowYearGroupRaw) return yearGroup;
+        const s = String(rowYearGroupRaw).trim().toLowerCase();
+        if (s.includes('10')) return '10 IGCSE' as YearGroup;
+        if (s.includes('11')) return '11 IGCSE' as YearGroup;
+        if (s.includes('12') && s.includes('ib')) return '12 IB' as YearGroup;
+        if (s.includes('13') && s.includes('ib')) return '13 IB' as YearGroup;
+        if (s === '7') return 7 as YearGroup;
+        if (s === '8') return 8 as YearGroup;
+        if (s === '9') return 9 as YearGroup;
+        return yearGroup;
+      })();
+      // If row says a different year from import config, trust import config (handles data entry errors)
+      const effectiveYearGroup = String(rowYearGroup) === String(yearGroup) ? yearGroup : yearGroup;
+
       // Read per-row subject and level (overrides the import config defaults for this row)
       const rowSubjectOverride = findValue(row, ['subject', 'subjects']);
       const rowLevel = normalizeLevel(findValue(row, ['level', 'ib level', 'iblevel']));
+
+      // Use the per-row sheet name as the group name when data came from multiple sheets,
+      // so "10R" and "10S" sheets are kept as separate groups rather than merged into one.
+      const effectiveGroupName = (rowSheetName && rowSheetName !== defaultSheetName)
+        ? rowSheetName
+        : groupName;
+
+      // Also ensure group record exists for this effectiveGroupName
+      if (effectiveGroupName) {
+        const gKey = `${String(yearGroup)}|${effectiveGroupName}|${selectedAcademicYear}`;
+        const groupKeys = new Set(newGroups.map(g => `${String(g.yearGroup)}|${g.name}|${g.academicYear}`));
+        if (!groupKeys.has(gKey)) {
+          newGroups.push({
+            id: Math.random().toString(36).substr(2, 9),
+            yearGroup,
+            name: effectiveGroupName,
+            academicYear: selectedAcademicYear
+          });
+        }
+      }
 
       // Ensure student exists
       let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === yearGroup && s.academicYear === selectedAcademicYear);
@@ -1482,12 +1540,12 @@ export default function App() {
           id: Math.random().toString(36).substr(2, 9), 
           name: studentName, 
           yearGroup,
-          groupName,
+          groupName: effectiveGroupName,
           academicYear: selectedAcademicYear
         } as any;
         newStudents.push(student);
-      } else if (student.groupName !== groupName) {
-        student.groupName = groupName;
+      } else if (student.groupName !== effectiveGroupName) {
+        student.groupName = effectiveGroupName;
       }
 
       // Store subject level on student if provided (e.g. Physics: HL)
@@ -1545,13 +1603,17 @@ export default function App() {
         scoreColumns.forEach(col => {
           if (row[col] === undefined || row[col] === null || row[col] === '') return;
           
-          // Skip non-numeric values (e.g. "new", "absent", "n/a") — treat as not marked
           const rawVal = String(row[col]).trim();
-          if (isNaN(parseFloat(rawVal))) return;
+          
+          // Detect explicit absent markers
+          const isAbsent = /^(absent|abs|a\/a|n\/a|na|-)$/i.test(rawVal);
+          
+          // Skip non-numeric, non-absent values (e.g. "new", "tbd")
+          if (!isAbsent && isNaN(parseFloat(rawVal))) return;
 
-          const rowScoreRaw = parseFloat(rawVal);
+          const rowScoreRaw = isAbsent ? 0 : parseFloat(rawVal);
           const { name: rowAssessmentName, maxMarks: rowMaxMarks, subjectFromHeader } = extractInfo(col, isFirstRowSubHeader ? firstRow : null, rowSheetName);
-          const rowScore = Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
+          const rowScore = isAbsent ? 0 : Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
           // Subject priority: 1) encoded in column header ("Assessment - Physics (35)")
           //                   2) per-row Subject/Subjects column (only if single subject)
           //                   3) import config default
@@ -1593,18 +1655,21 @@ export default function App() {
             }
           }
 
-          // Update existing mark or add new one; remove absent flag if score provided
+          // Update existing mark or add new one; handle absent flag
           const existingMarkIdx = newMarks.findIndex(m => m.studentId === student!.id && m.assessmentId === assessment!.id);
           if (existingMarkIdx !== -1) {
-            newMarks[existingMarkIdx].score = rowScore;
-            delete (newMarks[existingMarkIdx] as any).absent; // clear absent flag if score now provided
+            if (isAbsent) {
+              (newMarks[existingMarkIdx] as any).absent = true;
+              newMarks[existingMarkIdx].score = 0;
+            } else {
+              newMarks[existingMarkIdx].score = rowScore;
+              delete (newMarks[existingMarkIdx] as any).absent;
+            }
           } else {
-            newMarks.push({ 
-              id: Math.random().toString(36).substr(2, 9),
-              studentId: student!.id, 
-              assessmentId: assessment.id, 
-              score: rowScore 
-            });
+            newMarks.push(isAbsent
+              ? { id: Math.random().toString(36).substr(2, 9), studentId: student!.id, assessmentId: assessment.id, score: 0, absent: true } as any
+              : { id: Math.random().toString(36).substr(2, 9), studentId: student!.id, assessmentId: assessment.id, score: rowScore }
+            );
           }
         });
       } else {
