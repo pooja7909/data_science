@@ -369,17 +369,27 @@ export default function App() {
   // Runs across ALL academic years so old ghost groups get purged regardless of selected year
   useEffect(() => {
     if (!hasLoaded || groups.length === 0) return;
+    // Normalise yearGroup to string before comparing, to avoid race with migrateYear effect
+    // e.g. numeric 10 and string "10 IGCSE" both normalise consistently
+    const normaliseYG = (y: any): string => {
+      const s = String(y).trim();
+      if (s === '10' || s === '10 IGCSE') return '10 IGCSE';
+      if (s === '11' || s === '11 IGCSE') return '11 IGCSE';
+      if (s === '12' || s === '12 IB') return '12 IB';
+      if (s === '13' || s === '13 IB') return '13 IB';
+      return s;
+    };
     // Build a key set from ALL students across all years
     const studentGroupKeys = new Set(
-      students.map(s => `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
+      students.map(s => `${normaliseYG(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
     );
     const orphanedGroups = groups.filter(g => 
-      !studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
+      !studentGroupKeys.has(`${normaliseYG(g.yearGroup)}|${g.name}|${g.academicYear}`)
     );
     if (orphanedGroups.length > 0) {
       console.log(`Cleaning up ${orphanedGroups.length} orphaned group(s):`, orphanedGroups.map(g => g.name));
       setGroups(prev => prev.filter(g => 
-        studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
+        studentGroupKeys.has(`${normaliseYG(g.yearGroup)}|${g.name}|${g.academicYear}`)
       ));
       // Delete from Firestore permanently
       orphanedGroups.forEach(g => {
@@ -1273,6 +1283,8 @@ export default function App() {
         // Filter for columns that are likely scores (not metadata and contain numeric data)
         const extraColumns = headers.filter(h => {
           if (metadataHeaders.includes(normalizeKey(h))) return false;
+          // Skip blank/auto-generated XLSX column names (from empty header cells)
+          if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
           
           // Check if at least one row has a numeric value in this column
           return data.some((row: any) => {
@@ -1453,6 +1465,10 @@ export default function App() {
     const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
     const scoreColumns: string[] = headers.filter(h => {
       if (metadataHeaders.includes(normalizeKey(h))) return false;
+      // Skip blank/auto-generated XLSX column names (from empty header cells)
+      if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
+      // Include if header has "(N)" marks pattern (even if all values currently null)
+      if (/\(\d+\)/.test(h)) return true;
       return data.some((row: any) => {
         const val = row[h];
         return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
@@ -1538,8 +1554,22 @@ export default function App() {
         }
       }
 
-      // Ensure student exists
-      let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === effectiveYearGroup && s.academicYear === selectedAcademicYear);
+      // Ensure student exists — match by name + yearGroup (normalised) + group + academicYear
+      // Normalise yearGroup for comparison to handle numeric vs string (e.g. 10 vs "10 IGCSE")
+      const normaliseYGStr = (y: any) => {
+        const s = String(y).trim();
+        if (s === '10' || s === '10 IGCSE') return '10 IGCSE';
+        if (s === '11' || s === '11 IGCSE') return '11 IGCSE';
+        if (s === '12' || s === '12 IB') return '12 IB';
+        if (s === '13' || s === '13 IB') return '13 IB';
+        return s;
+      };
+      let student = newStudents.find(s => 
+        s.name.trim().toLowerCase() === studentName.toLowerCase() && 
+        normaliseYGStr(s.yearGroup) === normaliseYGStr(effectiveYearGroup) && 
+        s.groupName === effectiveGroupName &&
+        s.academicYear === selectedAcademicYear
+      );
       if (!student) {
         student = { 
           id: Math.random().toString(36).substr(2, 9), 
@@ -1755,6 +1785,8 @@ export default function App() {
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const scoreColumns = headers.filter(h => {
       if (metadataKeys.includes(normalizeKey(h))) return false;
+      // Skip blank/auto-generated XLSX column names (from empty header cells)
+      if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
       // Include column if it has numeric data OR if header contains "(N)" max-marks pattern
       // This catches assessment columns that are all-empty (e.g. not yet marked)
       if (/\(\d+\)/.test(h)) return true;
