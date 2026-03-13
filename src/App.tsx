@@ -180,7 +180,7 @@ export default function App() {
 
   useEffect(() => {
     if (groupFilter !== 'all') {
-      // Find which year this group belongs to
+      // Find which year this group belongs to and auto-expand
       const student = students.find(s => s.groupName === groupFilter && s.academicYear === selectedAcademicYear);
       if (student) {
         const yearSectionId = `year-${student.yearGroup}`;
@@ -194,6 +194,17 @@ export default function App() {
       }
     }
   }, [groupFilter, students, selectedAcademicYear]);
+
+  // Auto-expand the selected year section in the sidebar
+  useEffect(() => {
+    if (yearFilter !== 'all' && yearFilter !== 'IGCSE_ALL' && yearFilter !== 'IB_ALL') {
+      setExpandedSections(prev => {
+        const next = new Set(prev);
+        next.add(`year-${yearFilter}`);
+        return next;
+      });
+    }
+  }, [yearFilter]);
 
   // Reset modal filters when modals are closed
   useEffect(() => {
@@ -425,12 +436,13 @@ export default function App() {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
-      // Subject filter: show students if they have marks in the subject OR if no subject filter applied
-      // Students without marks in a subject still show (subject filter primarily affects performance detail)
-      const hasMarksInSubject = performanceSubjectFilter === 'all' || 
-        p.marks.some(m => m.assessment.subject === performanceSubjectFilter) ||
-        p.marks.length === 0; // Students with no marks always show in sidebar
-      return matchesSearch && matchesYear && matchesGroup && hasMarksInSubject;
+      // Subject filter:
+      // - "All Subjects" → show everyone
+      // - Specific subject → only show students who have at least one mark/assessment in that subject
+      //   Students with no marks at all are only shown under "All Subjects"
+      const matchesSubject = performanceSubjectFilter === 'all' || 
+        p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
+      return matchesSearch && matchesYear && matchesGroup && matchesSubject;
     });
   }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter]);
 
@@ -1489,6 +1501,7 @@ export default function App() {
                   else if (!isNaN(parseInt(val)) && val.length === 1) setYearFilter(parseInt(val) as YearGroup);
                   else setYearFilter(val as YearGroup);
                   setGroupFilter('all'); // Reset group filter when year changes
+                  setPerformanceSubjectFilter('all'); // Reset subject filter when year changes
                 }}
               >
                 <option value="IGCSE_ALL">IGCSE (All)</option>
@@ -1521,10 +1534,17 @@ export default function App() {
               >
                 <option value="all">All Subjects</option>
                 {Array.from(new Set(
-                  yearFilter === 'all' ? Object.values(SUBJECTS_BY_YEAR).flat() :
-                  yearFilter === 'IGCSE_ALL' ? [...SUBJECTS_BY_YEAR['10 IGCSE'], ...SUBJECTS_BY_YEAR['11 IGCSE']] :
-                  yearFilter === 'IB_ALL' ? [...SUBJECTS_BY_YEAR['12 IB'], ...SUBJECTS_BY_YEAR['13 IB']] :
-                  SUBJECTS_BY_YEAR[yearFilter as YearGroup] || []
+                  // Only show subjects that actually have assessments in the selected year
+                  assessments
+                    .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter))
+                    .map(a => a.subject)
+                    // Fall back to theoretical subjects if no assessments exist yet
+                    .concat(
+                      yearFilter === 'all' ? Object.values(SUBJECTS_BY_YEAR).flat() :
+                      yearFilter === 'IGCSE_ALL' ? [...SUBJECTS_BY_YEAR['10 IGCSE'], ...SUBJECTS_BY_YEAR['11 IGCSE']] :
+                      yearFilter === 'IB_ALL' ? [...SUBJECTS_BY_YEAR['12 IB'], ...SUBJECTS_BY_YEAR['13 IB']] :
+                      SUBJECTS_BY_YEAR[yearFilter as YearGroup] || []
+                    )
                 )).map(subject => (
                   <option key={subject} value={subject}>{subject}</option>
                 ))}
