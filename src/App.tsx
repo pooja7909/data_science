@@ -288,9 +288,14 @@ export default function App() {
   // Helper for year group matching
   const matchesYearFilter = (itemYear: YearGroup, filter: YearGroup | 'all' | 'IGCSE_ALL' | 'IB_ALL') => {
     if (filter === 'all') return true;
-    if (filter === 'IGCSE_ALL') return (itemYear as any) === 10 || (itemYear as any) === 11 || String(itemYear).includes('IGCSE');
-    if (filter === 'IB_ALL') return (itemYear as any) === 12 || (itemYear as any) === 13 || String(itemYear).includes('IB');
-    return itemYear === filter;
+    
+    const itemYearStr = String(itemYear);
+    const filterStr = String(filter);
+    
+    if (filter === 'IGCSE_ALL') return itemYearStr === '10' || itemYearStr === '11' || itemYearStr.includes('IGCSE');
+    if (filter === 'IB_ALL') return itemYearStr === '12' || itemYearStr === '13' || itemYearStr.includes('IB');
+    
+    return itemYearStr === filterStr;
   };
 
   // Data Migration for old year formats
