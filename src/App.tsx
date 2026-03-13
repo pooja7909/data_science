@@ -1564,10 +1564,12 @@ export default function App() {
         if (s === '13' || s === '13 IB') return '13 IB';
         return s;
       };
+      // Match by name + yearGroup + academicYear only (NOT groupName).
+      // This ensures re-importing always corrects a student's groupName
+      // if it was wrong from a previous import (e.g. "10 IGCSE" -> "10R").
       let student = newStudents.find(s => 
         s.name.trim().toLowerCase() === studentName.toLowerCase() && 
         normaliseYGStr(s.yearGroup) === normaliseYGStr(effectiveYearGroup) && 
-        s.groupName === effectiveGroupName &&
         s.academicYear === selectedAcademicYear
       );
       if (!student) {
@@ -2747,6 +2749,22 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Warning banner when groups have year-group-style names (stale import data) */}
+                {groups.filter(g => 
+                  g.academicYear === selectedAcademicYear && 
+                  ['7','8','9','10 IGCSE','11 IGCSE','12 IB','13 IB'].includes(String(g.name))
+                ).length > 0 && (
+                  <div className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2">
+                    <span className="text-amber-500 text-lg leading-none mt-0.5">⚠️</span>
+                    <div className="flex-1">
+                      <p className="text-xs font-bold text-amber-800">Groups not separated correctly</p>
+                      <p className="text-[10px] text-amber-700 mt-0.5">
+                        Some students are grouped under a year label (e.g. "10 IGCSE") instead of their class (e.g. "10R", "10S"). 
+                        Please re-import your Excel files using <strong>Import Data</strong> to fix this — the app will automatically correct the group names.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="card max-h-[calc(100vh-250px)] overflow-y-auto divide-y divide-slate-100">
                   {filteredPerformances.length === 0 ? (
                     <div className="p-8 text-center">
