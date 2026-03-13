@@ -144,6 +144,7 @@ export default function App() {
   const [showMarksModal, setShowMarksModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importPreview, setImportPreview] = useState<{assessments: string[], students: number, marks: number} | null>(null);
+  const [importColumnSubjects, setImportColumnSubjects] = useState<Record<string, string>>({});
   const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string, sheetName?: string } | null>(null);
   const [importConfig, setImportConfig] = useState({ 
     yearGroup: 7 as YearGroup, 
@@ -1301,6 +1302,7 @@ export default function App() {
         });
         
         setImportPreview(null);
+        setImportColumnSubjects({});
         setShowImportModal(true);
         e.target.value = '';
       };
@@ -1554,10 +1556,14 @@ export default function App() {
           //                   2) per-row Subject/Subjects column (only if single subject)
           //                   3) import config default
           const rowSubjectRaw = rowSubjectOverride ? rowSubjectOverride.trim() : defaultSubject;
-          // If Subjects column has multiple subjects (comma-separated), don't use it as subject
-          // for column-based assessments — rely on header encoding or import config instead
           const subjectsAreMultiple = rowSubjectRaw.includes(',');
+          // Subject priority:
+          // 1. Encoded in column header: "Programming - Computer Science(35)"
+          // 2. User assigned per-column in the import preview UI (importColumnSubjects)
+          // 3. Per-row Subject column (only if single subject, not comma-separated list)
+          // 4. Global import config subject (fallback)
           const rowSubject = subjectFromHeader 
+            || importColumnSubjects[col]
             || (subjectsAreMultiple ? defaultSubject : rowSubjectRaw);
           const rowDate = defaultDate;
 
@@ -1726,6 +1732,21 @@ export default function App() {
         if (v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()))) markCount++;
       });
     });
+
+    // Build per-column subject assignments (auto-detected from header or blank)
+    const colSubjects: Record<string, string> = {};
+    scoreColumns.forEach(col => {
+      const marksMatch = col.match(/\((\d+)\)/);
+      let name = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
+      const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+      if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
+        colSubjects[col] = allSubjects.find(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())!;
+      } else {
+        colSubjects[col] = ''; // needs user to assign
+      }
+    });
+    setImportColumnSubjects(colSubjects);
 
     setImportPreview({
       assessments: assessmentNames,
@@ -4144,21 +4165,52 @@ export default function App() {
                       <p className="text-[10px] text-slate-500">Marks</p>
                     </div>
                   </div>
-                  {importPreview.assessments.length > 0 && (
+
+                  {Object.keys(importColumnSubjects).length > 0 ? (
                     <div>
-                      <p className="text-[10px] font-bold text-slate-500 mb-1.5">Assessments detected:</p>
-                      <div className="space-y-1 max-h-32 overflow-y-auto">
-                        {importPreview.assessments.map((a, i) => (
-                          <div key={i} className="text-[11px] text-indigo-700 bg-white px-2 py-1 rounded border border-indigo-100 font-medium">
-                            ✓ {a}
-                          </div>
-                        ))}
+                      <p className="text-[10px] font-bold text-slate-500 mb-1.5 uppercase tracking-wide">
+                        Assessments detected — assign a subject to each:
+                      </p>
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {Object.entries(importColumnSubjects).map(([col, subject]) => {
+                          // Parse name and maxMarks from column header for display
+                          const marksMatch = col.match(/\((\d+)\)/);
+                          const maxMarks = marksMatch ? parseInt(marksMatch[1]) : importConfig.maxMarks;
+                          let displayName = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
+                          // Strip subject suffix if auto-detected
+                          const dashMatch = displayName.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+                          if (dashMatch) displayName = dashMatch[1].trim();
+                          return (
+                            <div key={col} className="flex items-center gap-2 bg-white rounded-lg px-2 py-1.5 border border-indigo-100">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[11px] font-bold text-slate-800 truncate">{displayName}</p>
+                                <p className="text-[9px] text-slate-400">{maxMarks} marks</p>
+                              </div>
+                              <select
+                                className={`text-[10px] font-bold border rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400 ${
+                                  !subject ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                }`}
+                                value={subject}
+                                onChange={e => setImportColumnSubjects(prev => ({ ...prev, [col]: e.target.value }))}
+                              >
+                                <option value="">— pick subject —</option>
+                                {SUBJECTS_BY_YEAR[importConfig.yearGroup].map(s => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })}
                       </div>
+                      {Object.values(importColumnSubjects).some(s => !s) && (
+                        <p className="text-[10px] text-amber-600 mt-1.5 font-medium">
+                          ⚠ Assign a subject to every assessment before importing.
+                        </p>
+                      )}
                     </div>
-                  )}
-                  {importPreview.assessments.length === 0 && (
+                  ) : (
                     <div className="text-[11px] text-amber-600 bg-amber-50 px-3 py-2 rounded-lg border border-amber-100">
-                      ⚠ No assessment columns detected. Check your column headers include max marks e.g. "Test 1 (50)" or "Paper 1 - Physics (80)".
+                      ⚠ No assessment columns detected. Check column headers include max marks e.g. "Test 1 (50)".
                     </div>
                   )}
                 </div>
@@ -4178,9 +4230,13 @@ export default function App() {
                   Preview
                 </button>
                 <button 
-                  onClick={() => { confirmImport(); setImportPreview(null); }}
-                  className="btn-primary flex-1"
-                  disabled={importPreview?.assessments.length === 0}
+                  onClick={() => { confirmImport(); setImportPreview(null); setImportColumnSubjects({}); }}
+                  className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={
+                    !importPreview ||
+                    Object.keys(importColumnSubjects).length === 0 ||
+                    Object.values(importColumnSubjects).some(s => !s)
+                  }
                 >
                   Import
                 </button>
