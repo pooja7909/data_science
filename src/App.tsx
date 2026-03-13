@@ -1138,28 +1138,90 @@ export default function App() {
   };
 
   const downloadTemplate = () => {
-    const headers = ['studentName', 'yearGroup', 'groupName', 'assessmentName', 'subject', 'score', 'maxMarks', 'date'];
-    const sampleData = [
-      ['John Doe', '10 IGCSE', '10-A', 'Midterm Exam', 'Physics', '85', '100', '2024-03-15'],
-      ['Jane Smith', '10 IGCSE', '10-A', 'Midterm Exam', 'Physics', '92', '100', '2024-03-15'],
-      ['Bob Wilson', '11 IGCSE', '11-B', 'Unit Test 1', 'Computer Science', '18', '20', '2024-03-10'],
-      ['Alice Brown', '12 IB', '12-C', 'Internal Assessment', 'Biology', '22', '24', '2024-03-20']
+    const wb = XLSX.utils.book_new();
+
+    // ── Sheet 1: Years 7-9 (Science + Computer Science) ─────────────────────
+    // One row per student per subject. Assessment columns = "Assessment Name (max marks)"
+    const ks3Headers = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Test 1 (50)', 'Test 2 (30)', 'End of Term (100)'];
+    const ks3Data = [
+      ks3Headers,
+      ['Ahmed',  'Sarah', '7', '7W', 'Science',          42, 25, 78],
+      ['Ahmed',  'Sarah', '7', '7W', 'Computer Science', 38, 22, 65],
+      ['Brown',  'James', '7', '7W', 'Science',          45, 28, 82],
+      ['Brown',  'James', '7', '7W', 'Computer Science', 40, 20, 70],
+      ['Clarke', 'Emma',  '8', '8A', 'Science',          48, 27, 85],
+      ['Clarke', 'Emma',  '8', '8A', 'Computer Science', 44, 26, 75],
     ];
-    
-    const csvContent = [
-      headers.join(','),
-      ...sampleData.map(row => row.join(','))
-    ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'student_marks_template.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
+    ws1['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Years 7-9 Marks');
+
+    // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
+    const igcseHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Paper 1 (80)', 'Paper 2 (70)', 'Mock Exam (100)'];
+    const igcseData = [
+      igcseHeaders,
+      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Physics',          65, 58, 72],
+      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Chemistry',        70, 62, 68],
+      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Biology',          60, 55, 65],
+      ['Brown',  'James', '10 IGCSE', '10A', 'Physics',          55, 50, 60],
+      ['Brown',  'James', '10 IGCSE', '10A', 'Computer Science', 72, 65, 78],
+      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Physics',          70, 64, 75],
+      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Chemistry',        68, 60, 70],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
+    ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Years 10-11 Marks');
+
+    // ── Sheet 3: Years 12-13 IB (with Level column) ──────────────────────────
+    const ibHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Level', 'Test 1 (45)', 'IA (24)', 'Mock Exam (100)'];
+    const ibData = [
+      ibHeaders,
+      ['Ahmed',  'Sarah', '12 IB', '12A', 'Physics',   'HL', 38, 20, 75],
+      ['Ahmed',  'Sarah', '12 IB', '12A', 'Chemistry', 'SL', 30, 18, 62],
+      ['Ahmed',  'Sarah', '12 IB', '12A', 'ESS',       'SL', 28, 16, 58],
+      ['Brown',  'James', '12 IB', '12A', 'Biology',   'HL', 40, 22, 80],
+      ['Brown',  'James', '12 IB', '12A', 'Computer Science', 'SL', 35, 19, 70],
+      ['Clarke', 'Emma',  '13 IB', '13A', 'Physics',   'HL', 42, 23, 82],
+      ['Clarke', 'Emma',  '13 IB', '13A', 'Chemistry', 'SL', 32, 20, 65],
+    ];
+    const ws3 = XLSX.utils.aoa_to_sheet(ibData);
+    ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 13 }, { wch: 10 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws3, 'Years 12-13 IB Marks');
+
+    // ── Sheet 4: Instructions ────────────────────────────────────────────────
+    const instructions = [
+      ['ASSESSMENT MARKS UPLOAD — INSTRUCTIONS'],
+      [''],
+      ['HOW TO USE THIS TEMPLATE'],
+      ['1.', 'Choose the correct sheet for your year group (Years 7-9, IGCSE, or IB).'],
+      ['2.', 'Delete the example rows — keep only the header row.'],
+      ['3.', 'Add one row per student per subject (e.g. Sarah Ahmed appears once for Physics, once for Chemistry).'],
+      ['4.', 'Add or rename assessment columns as needed — include max marks in brackets e.g. "Unit Test (40)".'],
+      ['5.', 'Leave a cell blank if a student has not yet sat that assessment.'],
+      ['6.', 'Save the file and upload it using the "Upload Completed File" button.'],
+      [''],
+      ['COLUMN GUIDE'],
+      ['Surname',      'Student family name — must match exactly the name already in the app'],
+      ['Forename',     'Student first name — must match exactly the name already in the app'],
+      ['Year Group',   'Exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
+      ['Group',        'Class code e.g. 7W, 10A — must match what is in the app'],
+      ['Subject',      'One subject per row: Science, Computer Science, Physics, Chemistry, Biology, or ESS'],
+      ['Level',        'IB only: HL or SL for each row'],
+      ['Assessment columns', 'Name the column with the assessment name and put max marks in brackets e.g. "Test 1 (50)"'],
+      [''],
+      ['TIPS'],
+      ['• You can have as many assessment columns as you like.'],
+      ['• If a student does not have a mark for an assessment, leave the cell empty.'],
+      ['• Student names must match exactly what is already in the app (same spelling and spacing).'],
+      ['• If a student is not yet in the app they will be created automatically on import.'],
+      ['• You can mix multiple classes on one sheet — the Group column separates them.'],
+      ['• Multiple sheets in one workbook are all imported at once.'],
+    ];
+    const ws4 = XLSX.utils.aoa_to_sheet(instructions);
+    ws4['!cols'] = [{ wch: 22 }, { wch: 75 }];
+    XLSX.utils.book_append_sheet(wb, ws4, 'Instructions');
+
+    XLSX.writeFile(wb, 'Assessment_Marks_Template.xlsx');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1331,7 +1393,10 @@ export default function App() {
 
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const metadataHeaders = [
-      'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
+      'studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname',
+      'surname', 'lastname', 'forename', 'firstname',
+      'yeargroup', 'year', 'groupname', 'group', 'class',
+      'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
       'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname'
     ].map(h => normalizeKey(h));
 
@@ -1350,7 +1415,15 @@ export default function App() {
     const dataToProcess = isFirstRowSubHeader ? data.slice(1) : data;
 
     dataToProcess.forEach((row: any) => {
-      const studentNameRaw = findValue(row, ['studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname']);
+      // Support both "Student Name" single column and "Surname" + "Forename" split columns
+      let studentNameRaw = findValue(row, ['studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname']);
+      if (!studentNameRaw) {
+        const surname = findValue(row, ['surname', 'lastname', 'last name', 'familyname']);
+        const forename = findValue(row, ['forename', 'firstname', 'first name', 'givenname']);
+        if (surname || forename) {
+          studentNameRaw = `${String(forename || '').trim()} ${String(surname || '').trim()}`.trim();
+        }
+      }
       if (!studentNameRaw) return;
       const studentName = String(studentNameRaw).trim();
 
