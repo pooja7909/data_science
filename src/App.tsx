@@ -39,7 +39,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries, deleteStudent as fbDeleteStudent, deleteAssessment as fbDeleteAssessment, deleteMark as fbDeleteMark, deleteGroup as fbDeleteGroup } from './services/firebaseService';
-import { setDoc, doc, deleteDoc } from 'firebase/firestore';
+import { setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { 
   Student, 
@@ -373,7 +373,7 @@ export default function App() {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
-      const hasMarksInSubject = performanceSubjectFilter === 'all' || p.marks.length > 0;
+      const hasMarksInSubject = performanceSubjectFilter === 'all' || p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
       return matchesSearch && matchesYear && matchesGroup && hasMarksInSubject;
     });
   }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter]);
@@ -733,8 +733,16 @@ export default function App() {
     if (confirm('Are you sure you want to delete this group? Students will remain but will be unassigned from this group.')) {
       try {
         setSaveStatus('saving');
-        await deleteDoc(doc(db, 'groups', groupId));
-        setGroups(prev => prev.filter(g => g.id !== groupId));
+        const group = groups.find(g => g.id === groupId);
+        if (group) {
+          await deleteDoc(doc(db, 'groups', groupId));
+          setGroups(prev => prev.filter(g => g.id !== groupId));
+          
+          // Clear groupName for students in this group
+          const studentsToUpdate = students.filter(s => s.groupName === group.name && s.yearGroup === group.yearGroup && s.academicYear === group.academicYear);
+          await Promise.all(studentsToUpdate.map(s => updateDoc(doc(db, 'students', s.id), { groupName: '' })));
+          setStudents(prev => prev.map(s => studentsToUpdate.find(stu => stu.id === s.id) ? { ...s, groupName: '' } : s));
+        }
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 3000);
       } catch (error) {
