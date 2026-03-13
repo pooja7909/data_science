@@ -319,6 +319,29 @@ export default function App() {
     }
   }, [students, assessments]);
 
+  // Cleanup orphaned groups (groups with no students) from Firestore and local state
+  useEffect(() => {
+    if (!hasLoaded || groups.length === 0) return;
+    const studentGroupKeys = new Set(
+      students
+        .filter(s => s.academicYear === selectedAcademicYear)
+        .map(s => `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
+    );
+    const orphanedGroups = groups.filter(g => 
+      !studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
+    );
+    if (orphanedGroups.length > 0) {
+      // Remove orphaned groups from local state silently
+      setGroups(prev => prev.filter(g => 
+        studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
+      ));
+      // Also remove from Firestore
+      orphanedGroups.forEach(g => {
+        deleteDoc(doc(db, 'groups', g.id)).catch(console.error);
+      });
+    }
+  }, [hasLoaded, students, groups, selectedAcademicYear]);
+
   // Derived Data
   const performances = useMemo(() => {
     const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
@@ -385,13 +408,9 @@ export default function App() {
   const availableGroups = useMemo(() => {
     const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
     const filteredByYear = currentYearStudents.filter(s => matchesYearFilter(s.yearGroup, yearFilter));
-    // Include groups from both the groups collection AND from students directly (handles bulk imports)
-    const groupsFromStudents = Array.from(new Set(filteredByYear.map(s => s.groupName))).filter(Boolean);
-    const groupsFromCollection = groups
-      .filter(g => matchesYearFilter(g.yearGroup, yearFilter) && g.academicYear === selectedAcademicYear)
-      .map(g => g.name);
-    return Array.from(new Set([...groupsFromStudents, ...groupsFromCollection])).sort();
-  }, [students, selectedAcademicYear, yearFilter, groups]);
+    // Only show groups that actually have students - prevents ghost/deleted groups from appearing
+    return Array.from(new Set(filteredByYear.map(s => s.groupName))).filter(Boolean).sort();
+  }, [students, selectedAcademicYear, yearFilter]);
 
   const topPerformers = useMemo(() => {
     return [...filteredPerformances]
@@ -2122,9 +2141,8 @@ export default function App() {
                       .filter(y => matchesYearFilter(y, yearFilter))
                       .map(year => {
                         const yearStudents = filteredPerformances.filter(p => p.student.yearGroup === year);
-                        const definedGroups = groups.filter(g => g.yearGroup === year && g.academicYear === selectedAcademicYear).map(g => g.name);
-                        const studentGroups = Array.from(new Set(yearStudents.map(p => p.student.groupName))).filter(Boolean);
-                        const yearGroups = Array.from(new Set([...definedGroups, ...studentGroups])).sort();
+                        // Only show groups that have actual students (prevents ghost/deleted groups)
+                        const yearGroups = Array.from(new Set(yearStudents.map(p => p.student.groupName))).filter(Boolean).sort();
                         
                         if (yearGroups.length === 0 && yearStudents.length === 0) return null;
                         
@@ -2915,19 +2933,14 @@ export default function App() {
                         <option value="all">All Groups</option>
                         {(() => {
                           const assessment = assessments.find(a => a.id === showMarksModal);
-                          const fromCollection = groups.filter(g => 
-                            assessment 
-                              ? (String(g.yearGroup) === String(assessment.yearGroup) && g.academicYear === selectedAcademicYear) 
-                              : g.academicYear === selectedAcademicYear
-                          ).map(g => g.name);
-                          // Also include groups from students directly (handles bulk-imported students)
+                          // Only show groups that actually have students (prevents ghost groups)
                           const fromStudents = students
                             .filter(s => assessment 
                               ? (String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === selectedAcademicYear)
                               : s.academicYear === selectedAcademicYear)
                             .map(s => s.groupName)
                             .filter(Boolean);
-                          const allGroups = Array.from(new Set([...fromCollection, ...fromStudents])).sort();
+                          const allGroups = Array.from(new Set(fromStudents)).sort();
                           return allGroups.map(name => (
                             <option key={name} value={name}>{name}</option>
                           ));
