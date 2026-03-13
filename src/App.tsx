@@ -450,11 +450,15 @@ export default function App() {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
-      // Subject filter:
-      // - "All Subjects" → show everyone
-      // - Specific subject → only show students who have at least one mark/assessment in that subject
-      //   Students with no marks at all are only shown under "All Subjects"
-      const matchesSubject = performanceSubjectFilter === 'all' || 
+      // Subject filter logic:
+      // 1. If student has a subjects[] field (from import), use it directly
+      // 2. For Years 7-9, all students take all subjects for their year (Science + CS)
+      // 3. For Years 10-13, check marks if no subjects field set
+      const studentSubjects: string[] = (p.student as any).subjects?.length
+        ? (p.student as any).subjects
+        : SUBJECTS_BY_YEAR[p.student.yearGroup] || [];
+      const matchesSubject = performanceSubjectFilter === 'all' ||
+        studentSubjects.includes(performanceSubjectFilter) ||
         p.marks.some(m => m.assessment.subject === performanceSubjectFilter);
       return matchesSearch && matchesYear && matchesGroup && matchesSubject;
     });
@@ -887,6 +891,11 @@ export default function App() {
         const c = h.toLowerCase();
         return c.includes('group') || c.includes('class');
       });
+      const subjectsIdx = headers.findIndex(h => {
+        if (typeof h !== 'string') return false;
+        const c = h.toLowerCase();
+        return c.includes('subject');
+      });
       
       const normalizeYearGroup = (val: any): YearGroup => {
         if (!val) return 7;
@@ -901,13 +910,29 @@ export default function App() {
         return 7;
       };
 
-      return dataRows.map(row => ({
-        id: Math.random().toString(36).substr(2, 9),
-        name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
-        yearGroup: normalizeYearGroup(row[yearIdx]),
-        groupName: (groupIdx !== -1 ? String(row[groupIdx] || '') : guessedGroup) || '',
-        academicYear: selectedAcademicYear
-      })).filter(s => s.name !== '' && s.name !== ' ');
+      return dataRows.map(row => {
+        const yearGroup = normalizeYearGroup(row[yearIdx]);
+        // Parse subjects: if column exists use it, else auto-assign all subjects for the year
+        let subjects: string[] = SUBJECTS_BY_YEAR[yearGroup] || [];
+        if (subjectsIdx !== -1 && row[subjectsIdx]) {
+          // Support comma-separated subjects e.g. "Physics, Chemistry" or "Biology"
+          const rawSubjects = String(row[subjectsIdx]).split(',').map((s: string) => s.trim()).filter(Boolean);
+          // Normalise to match exact subject names (case-insensitive)
+          const allSubjectsForYear = SUBJECTS_BY_YEAR[yearGroup] || [];
+          subjects = rawSubjects.map((rs: string) => {
+            const match = allSubjectsForYear.find(s => s.toLowerCase() === rs.toLowerCase());
+            return match || rs; // use matched name or keep as-is
+          });
+        }
+        return {
+          id: Math.random().toString(36).substr(2, 9),
+          name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
+          yearGroup,
+          groupName: (groupIdx !== -1 ? String(row[groupIdx] || '') : guessedGroup) || '',
+          academicYear: selectedAcademicYear,
+          subjects
+        };
+      }).filter(s => s.name !== '' && s.name !== ' ');
     };
 
     const finalizeImport = (newStudents: any[]) => {
@@ -1384,12 +1409,17 @@ export default function App() {
 
   const handleAddStudent = (e: React.FormEvent) => {
     e.preventDefault();
-    const student: Student = {
+    // If no subjects explicitly set, default to all subjects for the year group
+    const studentSubjects = (newStudent as any).subjects?.length
+      ? (newStudent as any).subjects
+      : SUBJECTS_BY_YEAR[newStudent.yearGroup] || [];
+    const student = {
       id: Math.random().toString(36).substr(2, 9),
       ...newStudent,
-      academicYear: selectedAcademicYear
+      academicYear: selectedAcademicYear,
+      subjects: studentSubjects
     };
-    setStudents(prev => [...prev, student]);
+    setStudents(prev => [...prev, student as Student]);
     setShowStudentModal(false);
     setNewStudent(prev => ({ ...prev, name: '' })); // Keep yearGroup and groupName
   };
@@ -2977,6 +3007,34 @@ export default function App() {
                       <option key={g.id} value={g.name}>{g.name}</option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Subjects</label>
+                  <div className="flex flex-wrap gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
+                    {(SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map(subject => {
+                      const currentSubjects: string[] = (newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || [];
+                      const isSelected = currentSubjects.includes(subject);
+                      return (
+                        <button
+                          key={subject}
+                          type="button"
+                          onClick={() => {
+                            const current: string[] = (newStudent as any).subjects || [...(SUBJECTS_BY_YEAR[newStudent.yearGroup] || [])];
+                            const updated = isSelected ? current.filter(s => s !== subject) : [...current, subject];
+                            setNewStudent({...newStudent, subjects: updated} as any);
+                          }}
+                          className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${
+                            isSelected 
+                              ? 'bg-indigo-600 text-white border-indigo-600' 
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                          }`}
+                        >
+                          {subject}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">Click to toggle — all selected by default</p>
                 </div>
                 <div className="flex gap-3 pt-4">
                   <button type="button" onClick={() => setShowStudentModal(false)} className="btn-secondary flex-1">Cancel</button>
