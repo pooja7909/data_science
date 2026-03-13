@@ -226,6 +226,19 @@ export default function App() {
     if (!showPaperGradingModal) setModalGroupFilter('all');
   }, [showPaperGradingModal]);
 
+  // Save immediately on page unload/refresh as safety net
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Fire-and-forget saves for any unsaved state
+      students.forEach(s => setDoc(doc(db, 'students', s.id), { ...s, yearGroup: migrateYear(s.yearGroup) }).catch(() => {}));
+      groups.forEach(g => setDoc(doc(db, 'groups', g.id), { ...g, yearGroup: migrateYear(g.yearGroup) }).catch(() => {}));
+      assessments.forEach(a => setDoc(doc(db, 'assessments', a.id), { ...a, yearGroup: migrateYear(a.yearGroup) }).catch(() => {}));
+      marks.forEach(m => setDoc(doc(db, 'marks', m.id), m).catch(() => {}));
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [students, groups, assessments, marks]);
+
   // #8: Escape key closes any open modal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1369,7 +1382,7 @@ export default function App() {
     }
   };
 
-  const confirmImport = () => {
+  const confirmImport = async () => {
     if (!pendingImport) return;
 
     const { data, sheetName: defaultSheetName } = pendingImport;
@@ -1749,6 +1762,26 @@ export default function App() {
         }
       }
     });
+
+    // Immediately persist to Firebase so data survives a refresh
+    // (don't rely on the debounced save useEffect which has a 1s delay)
+    setSaveStatus('saving');
+    try {
+      await Promise.all([
+        ...newStudents.map((s: any) => setDoc(doc(db, 'students', s.id), {
+          ...s, yearGroup: migrateYear(s.yearGroup)
+        })),
+        ...newAssessments.map((a: any) => setDoc(doc(db, 'assessments', a.id), {
+          ...a, yearGroup: migrateYear(a.yearGroup)
+        })),
+        ...newMarks.map((m: any) => setDoc(doc(db, 'marks', m.id), m)),
+        ...newGroups.map((g: any) => setDoc(doc(db, 'groups', g.id), {
+          ...g, yearGroup: migrateYear(g.yearGroup)
+        })),
+      ]);
+    } catch (saveError) {
+      console.error('Import save failed:', saveError);
+    }
 
     setGroups(newGroups);
     setStudents(newStudents);
