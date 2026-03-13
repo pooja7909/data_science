@@ -1177,35 +1177,30 @@ export default function App() {
     XLSX.utils.book_append_sheet(wb, ws1, 'Years 7-9 Marks');
 
     // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
-    const igcseHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Paper 1 (80)', 'Paper 2 (70)', 'Mock Exam (100)'];
+    // Option A: one row per student, subject encoded in column headers
+    // Assessment columns use "Assessment Name - Subject (maxMarks)" format
+    const igcseHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Paper 1 - Physics (80)', 'Paper 1 - Chemistry (80)', 'Paper 1 - Biology (80)', 'Programming - Computer Science (35)', 'Mock - Physics (100)'];
     const igcseData = [
       igcseHeaders,
-      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Physics',          65, 58, 72],
-      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Chemistry',        70, 62, 68],
-      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Biology',          60, 55, 65],
-      ['Brown',  'James', '10 IGCSE', '10A', 'Physics',          55, 50, 60],
-      ['Brown',  'James', '10 IGCSE', '10A', 'Computer Science', 72, 65, 78],
-      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Physics',          70, 64, 75],
-      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Chemistry',        68, 60, 70],
+      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Physics,Chemistry,Biology',    65, 70, 60, '',  72],
+      ['Brown',  'James', '10 IGCSE', '10A', 'Physics,Computer Science',     55, '', '', 65,  60],
+      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Physics,Chemistry',            70, 68, '', '',  75],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
-    ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+    ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 24 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws2, 'Years 10-11 Marks');
 
     // ── Sheet 3: Years 12-13 IB (with Level column) ──────────────────────────
-    const ibHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Level', 'Test 1 (45)', 'IA (24)', 'Mock Exam (100)'];
+    // Subject encoded in column headers — one row per student
+    const ibHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels', 'Test 1 - Physics (45)', 'Test 1 - Chemistry (45)', 'IA - Biology (24)', 'Mock - Physics (100)', 'Mock - Chemistry (100)'];
     const ibData = [
       ibHeaders,
-      ['Ahmed',  'Sarah', '12 IB', '12A', 'Physics',   'HL', 38, 20, 75],
-      ['Ahmed',  'Sarah', '12 IB', '12A', 'Chemistry', 'SL', 30, 18, 62],
-      ['Ahmed',  'Sarah', '12 IB', '12A', 'ESS',       'SL', 28, 16, 58],
-      ['Brown',  'James', '12 IB', '12A', 'Biology',   'HL', 40, 22, 80],
-      ['Brown',  'James', '12 IB', '12A', 'Computer Science', 'SL', 35, 19, 70],
-      ['Clarke', 'Emma',  '13 IB', '13A', 'Physics',   'HL', 42, 23, 82],
-      ['Clarke', 'Emma',  '13 IB', '13A', 'Chemistry', 'SL', 32, 20, 65],
+      ['Ahmed',  'Sarah', '12 IB', '12A', 'Physics,Chemistry,ESS',      'HL,SL,SL', 38, 30, '',  75, 62],
+      ['Brown',  'James', '12 IB', '12A', 'Biology,Computer Science',   'HL,SL',    '', '', 22,  '',  ''],
+      ['Clarke', 'Emma',  '13 IB', '13A', 'Physics,Chemistry',          'HL,SL',    42, 32, '',  82, 65],
     ];
     const ws3 = XLSX.utils.aoa_to_sheet(ibData);
-    ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 13 }, { wch: 10 }, { wch: 16 }];
+    ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 28 }, { wch: 12 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 20 }, { wch: 22 }];
     XLSX.utils.book_append_sheet(wb, ws3, 'Years 12-13 IB Marks');
 
     // ── Sheet 4: Instructions ────────────────────────────────────────────────
@@ -1227,10 +1222,12 @@ export default function App() {
       ['Group',        'Class code e.g. 7W, 10A — must match what is in the app'],
       ['Subject',      'One subject per row: Science, Computer Science, Physics, Chemistry, Biology, or ESS'],
       ['Level',        'IB only: HL or SL for each row'],
-      ['Assessment columns', 'Name the column with the assessment name and put max marks in brackets e.g. "Test 1 (50)"'],
+      ['Assessment columns', 'Format: "Assessment Name - Subject (max marks)" e.g. "Paper 1 - Physics (80)" or just "Test 1 (50)" if one subject per row'],
       [''],
       ['TIPS'],
       ['• You can have as many assessment columns as you like.'],
+      ['• KEY: For IGCSE/IB, put the subject in the column header: "Paper 1 - Physics (80)". This tells the app which subject each assessment belongs to.'],
+      ['• Leave a cell blank if a student did not sit that assessment — blank cells are skipped.'],
       ['• If a student does not have a mark for an assessment, leave the cell empty.'],
       ['• Student names must match exactly what is already in the app (same spelling and spacing).'],
       ['• If a student is not yet in the app they will be created automatically on import.'],
@@ -1379,36 +1376,57 @@ export default function App() {
       return undefined;
     };
 
+    // Normalise a subject string to match SUBJECTS_BY_YEAR keys (case-insensitive)
+    const normalizeSubjectName = (raw: string): string => {
+      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+      const match = allSubjects.find(s => s.toLowerCase() === raw.trim().toLowerCase());
+      return match || raw.trim();
+    };
+
     const extractInfo = (header: string, rowData?: any, sheetName?: string) => {
       let name = header;
       let maxMarks = defaultMaxMarks;
+      let subjectFromHeader: string | undefined;
 
-      // 1. Extract marks from header: "Topic 1 (29)"
+      // 1. Extract max marks from header: "Topic 1 (29)" or "Topic 1(29)"
       const marksMatch = header.match(/\((\d+)\)/);
       if (marksMatch) {
         maxMarks = parseInt(marksMatch[1]);
         name = header.replace(marksMatch[0], '').trim();
       }
 
-      // 2. Check for sub-header in the first row of data
+      // 2. Extract subject from header if present after a dash:
+      //    "Programming - Computer Science" → name=Programming, subject=Computer Science
+      //    "Topic 3 Data - Physics"         → name=Topic 3 Data, subject=Physics
+      const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+      if (dashMatch) {
+        const possibleSubject = dashMatch[2].trim();
+        const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+        const isKnownSubject = allSubjects.some(s => s.toLowerCase() === possibleSubject.toLowerCase());
+        if (isKnownSubject) {
+          name = dashMatch[1].trim();
+          subjectFromHeader = normalizeSubjectName(possibleSubject);
+        }
+      }
+
+      // 3. Check for sub-header in the first row of data
       if (rowData && rowData[header]) {
         const subVal = String(rowData[header]);
         const subMarksMatch = subVal.match(/\((\d+)\)/);
         if (subMarksMatch) {
           maxMarks = parseInt(subMarksMatch[1]);
-          // If the main header was generic, use the subheader name
           if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
             name = subVal.replace(subMarksMatch[0], '').trim() || name;
           }
         }
       }
 
-      // 3. Handle __EMPTY or generic names
+      // 4. Handle __EMPTY or generic names
       if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
         name = sheetName || 'Test Topic';
       }
 
-      return { name, maxMarks };
+      return { name, maxMarks, subjectFromHeader };
     };
 
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
@@ -1521,13 +1539,24 @@ export default function App() {
       } else if (scoreColumns.length > 0) {
         // Column-based assessments
         scoreColumns.forEach(col => {
-          if (row[col] === undefined) return;
+          if (row[col] === undefined || row[col] === null || row[col] === '') return;
           
-          const rowScoreRaw = parseFloat(row[col]) || 0;
-          const { name: rowAssessmentName, maxMarks: rowMaxMarks } = extractInfo(col, isFirstRowSubHeader ? firstRow : null, rowSheetName);
+          // Skip non-numeric values (e.g. "new", "absent", "n/a") — treat as not marked
+          const rawVal = String(row[col]).trim();
+          if (isNaN(parseFloat(rawVal))) return;
+
+          const rowScoreRaw = parseFloat(rawVal);
+          const { name: rowAssessmentName, maxMarks: rowMaxMarks, subjectFromHeader } = extractInfo(col, isFirstRowSubHeader ? firstRow : null, rowSheetName);
           const rowScore = Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
-          // Use per-row subject if provided (e.g. from Subject column), else fall back to import config
-          const rowSubject = rowSubjectOverride ? rowSubjectOverride.trim() : defaultSubject;
+          // Subject priority: 1) encoded in column header ("Assessment - Physics (35)")
+          //                   2) per-row Subject/Subjects column (only if single subject)
+          //                   3) import config default
+          const rowSubjectRaw = rowSubjectOverride ? rowSubjectOverride.trim() : defaultSubject;
+          // If Subjects column has multiple subjects (comma-separated), don't use it as subject
+          // for column-based assessments — rely on header encoding or import config instead
+          const subjectsAreMultiple = rowSubjectRaw.includes(',');
+          const rowSubject = subjectFromHeader 
+            || (subjectsAreMultiple ? defaultSubject : rowSubjectRaw);
           const rowDate = defaultDate;
 
           let assessment = newAssessments.find(a => a.name.trim().toLowerCase() === rowAssessmentName.trim().toLowerCase() && a.yearGroup === yearGroup && a.subject === rowSubject && a.academicYear === selectedAcademicYear);
