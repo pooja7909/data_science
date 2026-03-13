@@ -155,6 +155,7 @@ export default function App() {
   const [newAssessment, setNewAssessment] = useState({ name: '', subject: 'Science', maxMarks: 100, date: new Date().toISOString().split('T')[0], yearGroup: 7 as YearGroup });
   const [newStudent, setNewStudent] = useState({ name: '', yearGroup: 7 as YearGroup, groupName: '' });
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
+  const [groupFilter, setGroupFilter] = useState<string>('all');
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
   const [showPaperGradingModal, setShowPaperGradingModal] = useState<string | null>(null);
   const [extractionMode, setExtractionMode] = useState<'questions' | 'subparts'>('questions');
@@ -322,10 +323,17 @@ export default function App() {
     return performances.filter(p => {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
+      const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
       const hasMarksInSubject = performanceSubjectFilter === 'all' || p.marks.length > 0;
-      return matchesSearch && matchesYear && hasMarksInSubject;
+      return matchesSearch && matchesYear && matchesGroup && hasMarksInSubject;
     });
-  }, [performances, searchQuery, yearFilter, performanceSubjectFilter]);
+  }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter]);
+
+  const availableGroups = useMemo(() => {
+    const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
+    const filteredByYear = currentYearStudents.filter(s => matchesYearFilter(s.yearGroup, yearFilter));
+    return Array.from(new Set(filteredByYear.map(s => s.groupName))).filter(Boolean).sort();
+  }, [students, selectedAcademicYear, yearFilter]);
 
   const topPerformers = useMemo(() => {
     return [...filteredPerformances]
@@ -636,6 +644,11 @@ export default function App() {
         const c = h.toLowerCase();
         return c.includes('year');
       });
+      const groupIdx = headers.findIndex(h => {
+        if (typeof h !== 'string') return false;
+        const c = h.toLowerCase();
+        return c.includes('group') || c.includes('class');
+      });
       
       const normalizeYearGroup = (val: any): YearGroup => {
         if (!val) return 7;
@@ -654,9 +667,37 @@ export default function App() {
         id: Math.random().toString(36).substr(2, 9),
         name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
         yearGroup: normalizeYearGroup(row[yearIdx]),
-        groupName: guessedGroup || '',
+        groupName: (groupIdx !== -1 ? String(row[groupIdx] || '') : guessedGroup) || '',
         academicYear: selectedAcademicYear
       })).filter(s => s.name !== '' && s.name !== ' ');
+    };
+
+    const finalizeImport = (newStudents: any[]) => {
+      const existingStudentKeys = new Set(students.map(s => `${s.name.toLowerCase()}|${s.groupName.toLowerCase()}`));
+      
+      const toAdd: Student[] = [];
+      let duplicateCount = 0;
+      const seenInImport = new Set<string>();
+
+      newStudents.forEach(s => {
+        const key = `${s.name.toLowerCase()}|${s.groupName.toLowerCase()}`;
+        if (existingStudentKeys.has(key) || seenInImport.has(key)) {
+          duplicateCount++;
+        } else {
+          toAdd.push(s);
+          seenInImport.add(key);
+        }
+      });
+
+      if (toAdd.length > 0) {
+        setStudents(prev => [...prev, ...toAdd]);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      }
+
+      if (duplicateCount > 0) {
+        alert(`${duplicateCount} duplicate students were found and skipped (same name and group).`);
+      }
     };
 
     if (fileExtension === 'xlsx' || fileExtension === 'xls') {
@@ -672,9 +713,7 @@ export default function App() {
           allStudents.push(...processData(jsonData, wsname));
         });
 
-        setStudents(prev => [...prev, ...allStudents]);
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 3000);
+        finalizeImport(allStudents);
         e.target.value = '';
       };
       reader.readAsArrayBuffer(file);
@@ -684,11 +723,7 @@ export default function App() {
         skipEmptyLines: true,
         complete: (results) => {
           const allStudents = processData(results.data as any[][]);
-          if (allStudents.length > 0) {
-            setStudents(prev => [...prev, ...allStudents]);
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 3000);
-          }
+          finalizeImport(allStudents);
           e.target.value = '';
         }
       });
@@ -1218,6 +1253,7 @@ export default function App() {
                   if (val === 'all') setYearFilter('all');
                   else if (!isNaN(parseInt(val)) && val.length === 1) setYearFilter(parseInt(val) as YearGroup);
                   else setYearFilter(val as YearGroup);
+                  setGroupFilter('all'); // Reset group filter when year changes
                 }}
               >
                 <option value="IGCSE_ALL">IGCSE (All)</option>
@@ -1228,6 +1264,19 @@ export default function App() {
               </select>
             </div>
 
+            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Group</span>
+              <select 
+                className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+              >
+                <option value="all">All Groups</option>
+                {availableGroups.map(group => (
+                  <option key={group} value={group}>{group}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Subject</span>
               <select 
