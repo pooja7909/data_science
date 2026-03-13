@@ -896,6 +896,11 @@ export default function App() {
         const c = h.toLowerCase();
         return c.includes('subject');
       });
+      const levelsIdx = headers.findIndex(h => {
+        if (typeof h !== 'string') return false;
+        const c = h.toLowerCase();
+        return c.includes('level');
+      });
       
       const normalizeYearGroup = (val: any): YearGroup => {
         if (!val) return 7;
@@ -924,13 +929,23 @@ export default function App() {
             return match || rs; // use matched name or keep as-is
           });
         }
+        // Parse HL/SL levels — comma-separated in same order as subjects
+        let subjectLevels: Record<string, string> = {};
+        if (levelsIdx !== -1 && row[levelsIdx] && subjects.length > 0) {
+          const rawLevels = String(row[levelsIdx]).split(',').map((l: string) => l.trim().toUpperCase());
+          subjects.forEach((subj: string, i: number) => {
+            const level = rawLevels[i];
+            if (level === 'HL' || level === 'SL') subjectLevels[subj] = level;
+          });
+        }
         return {
           id: Math.random().toString(36).substr(2, 9),
           name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
           yearGroup,
           groupName: (groupIdx !== -1 ? String(row[groupIdx] || '') : guessedGroup) || '',
           academicYear: selectedAcademicYear,
-          subjects
+          subjects,
+          ...(Object.keys(subjectLevels).length > 0 && { subjectLevels })
         };
       }).filter(s => s.name !== '' && s.name !== ' ');
     };
@@ -1043,6 +1058,83 @@ export default function App() {
         }];
       }
     });
+  };
+
+  const downloadStudentTemplate = () => {
+    const wb = XLSX.utils.book_new();
+
+    // ── Sheet 1: Years 7-9 ───────────────────────────────────────────────────
+    const ks3Data = [
+      ['Surname', 'Forename', 'Year Group', 'Group'],
+      ['Ahmed',   'Sarah',    '7',          '7W'],
+      ['Brown',   'James',    '7',          '7W'],
+      ['Clarke',  'Emma',     '7',          '7X'],
+      ['Patel',   'Priya',    '8',          '8A'],
+      ['Wilson',  'Tom',      '8',          '8A'],
+      ['Hassan',  'Yusuf',    '9',          '9B'],
+    ];
+    const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
+    // Style header row width
+    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Years 7-9');
+
+    // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
+    const igcseData = [
+      ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects'],
+      ['Ahmed',   'Sarah',    '10 IGCSE',   '10A',   'Physics, Chemistry, Biology'],
+      ['Brown',   'James',    '10 IGCSE',   '10A',   'Physics, Computer Science'],
+      ['Clarke',  'Emma',     '10 IGCSE',   '10B',   'Chemistry, Biology, Computer Science'],
+      ['Patel',   'Priya',    '11 IGCSE',   '11A',   'Physics, Chemistry, Biology'],
+      ['Wilson',  'Tom',      '11 IGCSE',   '11A',   'Biology, Computer Science'],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
+    ws2['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Years 10-11 IGCSE');
+
+    // ── Sheet 3: Years 12-13 IB ──────────────────────────────────────────────
+    const ibData = [
+      ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels (HL or SL per subject, same order)'],
+      ['Ahmed',   'Sarah',    '12 IB',      '12A',   'Physics, Chemistry, ESS',            'HL, SL, SL'],
+      ['Brown',   'James',    '12 IB',      '12A',   'Biology, Computer Science',          'HL, SL'],
+      ['Clarke',  'Emma',     '12 IB',      '12B',   'Physics, Chemistry, Biology',        'HL, HL, SL'],
+      ['Patel',   'Priya',    '13 IB',      '13A',   'Physics, ESS, Computer Science',     'SL, SL, HL'],
+      ['Wilson',  'Tom',      '13 IB',      '13A',   'Biology, Chemistry',                 'HL, SL'],
+    ];
+    const ws3 = XLSX.utils.aoa_to_sheet(ibData);
+    ws3['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 45 }];
+    XLSX.utils.book_append_sheet(wb, ws3, 'Years 12-13 IB');
+
+    // ── Sheet 4: Instructions ────────────────────────────────────────────────
+    const instructions = [
+      ['STUDENT LIST UPLOAD — INSTRUCTIONS'],
+      [''],
+      ['Use the correct sheet for your year group and fill in one row per student.'],
+      [''],
+      ['COLUMN GUIDE'],
+      ['Surname',      'Student family name'],
+      ['Forename',     'Student first name'],
+      ['Year Group',   'Must be exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
+      ['Group',        'Class code e.g. 7W, 10A, 12B — must match exactly across sheets'],
+      ['Subjects',     'IGCSE & IB only. Comma-separated from: Physics, Chemistry, Biology, Computer Science, ESS'],
+      ['Levels',       'IB only. One HL or SL per subject in the same order as the Subjects column'],
+      [''],
+      ['SUBJECTS BY YEAR'],
+      ['Years 7-9',    'Science, Computer Science (assigned automatically — no column needed)'],
+      ['Years 10-11',  'Physics, Chemistry, Biology, Computer Science'],
+      ['Years 12-13',  'Physics, Chemistry, Biology, Computer Science, ESS'],
+      [''],
+      ['TIPS'],
+      ['• Delete the example rows before uploading — keep only the header row and your students.'],
+      ['• Year group values must match exactly (e.g. "10 IGCSE" not "Year 10" or "10").'],
+      ['• Group names are case-sensitive — "10A" and "10a" will be treated as different groups.'],
+      ['• For IB students, the Levels column must have the same number of entries as Subjects.'],
+      ['• You can upload separate sheets for each year group or combine them in one file.'],
+    ];
+    const ws4 = XLSX.utils.aoa_to_sheet(instructions);
+    ws4['!cols'] = [{ wch: 20 }, { wch: 70 }];
+    XLSX.utils.book_append_sheet(wb, ws4, 'Instructions');
+
+    XLSX.writeFile(wb, 'Student_List_Template.xlsx');
   };
 
   const downloadTemplate = () => {
@@ -2235,6 +2327,13 @@ export default function App() {
                     Bulk Import
                     <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleBulkStudentImport} />
                   </label>
+                  <button
+                    onClick={downloadStudentTemplate}
+                    className="btn-secondary w-full flex items-center justify-center gap-2 text-indigo-600 border-indigo-100 hover:bg-indigo-50"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download Student Template
+                  </button>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input 
