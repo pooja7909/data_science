@@ -38,8 +38,8 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
-import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries } from './services/firebaseService';
-import { setDoc, doc } from 'firebase/firestore';
+import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries, deleteStudent as fbDeleteStudent, deleteAssessment as fbDeleteAssessment, deleteMark as fbDeleteMark, deleteGroup as fbDeleteGroup } from './services/firebaseService';
+import { setDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { 
   Student, 
@@ -123,16 +123,16 @@ export default function App() {
   const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
   const [assessments, setAssessments] = useState<Assessment[]>(INITIAL_ASSESSMENTS);
   const [marks, setMarks] = useState<Mark[]>(INITIAL_MARKS);
-  const [yearBoundaries, setYearBoundaries] = useState<Record<YearGroup, GradeBoundary[]>>({
-    7: [...KS3_BOUNDARIES],
-    8: [...KS3_BOUNDARIES],
-    9: [...KS3_BOUNDARIES],
+  const [yearBoundaries, setYearBoundaries] = useState<Record<string, GradeBoundary[]>>({
+    '7': [...KS3_BOUNDARIES],
+    '8': [...KS3_BOUNDARIES],
+    '9': [...KS3_BOUNDARIES],
     '10 IGCSE': [...IGCSE_BOUNDARIES],
     '11 IGCSE': [...IGCSE_BOUNDARIES],
     '12 IB': [...IB_BOUNDARIES],
     '13 IB': [...IB_BOUNDARIES],
   });
-  const [selectedYearForSettings, setSelectedYearForSettings] = useState<YearGroup>(7);
+  const [selectedSettingScope, setSelectedSettingScope] = useState<string>('7');
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -223,7 +223,7 @@ export default function App() {
         setMarks(marks || []);
         setGroups(groups || []);
         if (fetchedBoundaries) {
-          setYearBoundaries(fetchedBoundaries as Record<YearGroup, GradeBoundary[]>);
+          setYearBoundaries(fetchedBoundaries as Record<string, GradeBoundary[]>);
         }
         setHasLoaded(true);
       } catch (error) {
@@ -343,7 +343,7 @@ export default function App() {
 
       // Status calculation
       let status: 'excellent' | 'on-track' | 'needs-improvement' = 'on-track';
-      const currentBoundaries = yearBoundaries[student.yearGroup] || [];
+      const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
       
       const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
       const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
@@ -641,29 +641,101 @@ export default function App() {
     console.log("Paper upload functionality disabled.");
   };
 
-  const deleteStudent = (studentId: string) => {
-    if (confirm('Are you sure you want to delete this student?')) {
-      setStudents(prev => prev.filter(s => s.id !== studentId));
-      setMarks(prev => prev.filter(m => m.studentId !== studentId));
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 3000);
+  const handleDeleteStudent = async (studentId: string) => {
+    if (confirm('Are you sure you want to delete this student and all their marks?')) {
+      try {
+        setSaveStatus('saving');
+        const studentMarks = marks.filter(m => m.studentId === studentId);
+        await Promise.all([
+          deleteDoc(doc(db, 'students', studentId)),
+          ...studentMarks.map(m => deleteDoc(doc(db, 'marks', m.id)))
+        ]);
+        
+        setStudents(prev => prev.filter(s => s.id !== studentId));
+        setMarks(prev => prev.filter(m => m.studentId !== studentId));
+        
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } catch (error) {
+        console.error("Failed to delete student:", error);
+        setSaveStatus('idle');
+      }
     }
   };
 
-  const handleDeleteClass = (year: YearGroup, groupName: string) => {
-    if (confirm(`Are you sure you want to delete all students in ${groupName} (Year ${year})?`)) {
-      const studentsToDelete = students.filter(s => 
-        s.yearGroup === year && 
-        s.groupName === groupName && 
-        s.academicYear === selectedAcademicYear
-      );
-      const studentIds = new Set(studentsToDelete.map(s => s.id));
-      
-      setStudents(prev => prev.filter(s => !studentIds.has(s.id)));
-      setMarks(prev => prev.filter(m => !studentIds.has(m.studentId)));
-      
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 3000);
+  const handleDeleteClass = async (year: YearGroup, groupName: string) => {
+    if (confirm(`Are you sure you want to delete all students and data in ${groupName} (Year ${year})?`)) {
+      try {
+        setSaveStatus('saving');
+        const studentsToDelete = students.filter(s => 
+          s.yearGroup === year && 
+          s.groupName === groupName && 
+          s.academicYear === selectedAcademicYear
+        );
+        const studentIds = new Set(studentsToDelete.map(s => s.id));
+        const marksToDelete = marks.filter(m => studentIds.has(m.studentId));
+        const groupToDelete = groups.find(g => g.name === groupName && g.yearGroup === year && g.academicYear === selectedAcademicYear);
+        
+        const deletePromises = [
+          ...studentsToDelete.map(s => deleteDoc(doc(db, 'students', s.id))),
+          ...marksToDelete.map(m => deleteDoc(doc(db, 'marks', m.id)))
+        ];
+        
+        if (groupToDelete) {
+          deletePromises.push(deleteDoc(doc(db, 'groups', groupToDelete.id)));
+        }
+        
+        await Promise.all(deletePromises);
+        
+        setStudents(prev => prev.filter(s => !studentIds.has(s.id)));
+        setMarks(prev => prev.filter(m => !studentIds.has(m.studentId)));
+        if (groupToDelete) {
+          setGroups(prev => prev.filter(g => g.id !== groupToDelete.id));
+        }
+        
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } catch (error) {
+        console.error("Failed to delete class:", error);
+        setSaveStatus('idle');
+      }
+    }
+  };
+
+  const handleDeleteAssessment = async (assessmentId: string) => {
+    if (confirm('Are you sure you want to delete this assessment and all associated marks?')) {
+      try {
+        setSaveStatus('saving');
+        const assessmentMarks = marks.filter(m => m.assessmentId === assessmentId);
+        await Promise.all([
+          deleteDoc(doc(db, 'assessments', assessmentId)),
+          ...assessmentMarks.map(m => deleteDoc(doc(db, 'marks', m.id)))
+        ]);
+        
+        setAssessments(prev => prev.filter(a => a.id !== assessmentId));
+        setMarks(prev => prev.filter(m => m.assessmentId !== assessmentId));
+        
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } catch (error) {
+        console.error("Failed to delete assessment:", error);
+        setSaveStatus('idle');
+      }
+    }
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    if (confirm('Are you sure you want to delete this group? Students will remain but will be unassigned from this group.')) {
+      try {
+        setSaveStatus('saving');
+        await deleteDoc(doc(db, 'groups', groupId));
+        setGroups(prev => prev.filter(g => g.id !== groupId));
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } catch (error) {
+        console.error("Failed to delete group:", error);
+        setSaveStatus('idle');
+      }
     }
   };
 
@@ -1217,7 +1289,7 @@ export default function App() {
     } else {
       setYearBoundaries(prev => ({
         ...prev,
-        [selectedYearForSettings]: [...(prev[selectedYearForSettings] || []), { grade: 'New', minPercentage: 0 }]
+        [selectedSettingScope]: [...(prev[selectedSettingScope] || []), { grade: 'New', minPercentage: 0 }]
       }));
     }
   };
@@ -2097,10 +2169,7 @@ export default function App() {
                                         <button 
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            if (confirm('Are you sure you want to delete this student?')) {
-                                              setStudents(prev => prev.filter(s => s.id !== p.student.id));
-                                              setMarks(prev => prev.filter(m => m.studentId !== p.student.id));
-                                            }
+                                            handleDeleteStudent(p.student.id);
                                           }}
                                           className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
                                         >
@@ -2309,10 +2378,7 @@ export default function App() {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => {
-                            setAssessments(prev => prev.filter(a => a.id !== assessment.id));
-                            setMarks(prev => prev.filter(m => m.assessmentId !== assessment.id));
-                          }}
+                          onClick={() => handleDeleteAssessment(assessment.id)}
                           className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
                           title="Delete Assessment"
                         >
@@ -2362,9 +2428,9 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   <button 
                     onClick={() => {
-                      const newBoundaries = [...(yearBoundaries[selectedYearForSettings] || [])];
+                      const newBoundaries = [...(yearBoundaries[selectedSettingScope] || [])];
                       newBoundaries.push({ grade: 'New', minPercentage: 0 });
-                      setYearBoundaries(prev => ({ ...prev, [selectedYearForSettings]: newBoundaries }));
+                      setYearBoundaries(prev => ({ ...prev, [selectedSettingScope]: newBoundaries }));
                     }}
                     className="btn-secondary flex items-center gap-2"
                   >
@@ -2373,26 +2439,32 @@ export default function App() {
                   </button>
                   <select 
                     className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={selectedYearForSettings}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (!isNaN(parseInt(val)) && val.length === 1) setSelectedYearForSettings(parseInt(val) as YearGroup);
-                      else setSelectedYearForSettings(val as YearGroup);
-                    }}
+                    value={selectedSettingScope}
+                    onChange={(e) => setSelectedSettingScope(e.target.value)}
                   >
-                    {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
-                      <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
-                    ))}
+                    <optgroup label="Year Groups">
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                        <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Individual Classes">
+                      {groups
+                        .filter(g => g.academicYear === selectedAcademicYear)
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map(g => (
+                          <option key={g.id} value={g.name}>{g.name} (Year {g.yearGroup})</option>
+                        ))}
+                    </optgroup>
                   </select>
                 </div>
               </div>
 
               <div className="card divide-y divide-slate-100">
-                {(yearBoundaries[selectedYearForSettings] || [])
+                {(yearBoundaries[selectedSettingScope] || [])
                   .sort((a, b) => b.minPercentage - a.minPercentage)
                   .map((boundary, idx) => {
                     // Find original index for state updates
-                    const originalIdx = (yearBoundaries[selectedYearForSettings] || []).indexOf(boundary);
+                    const originalIdx = (yearBoundaries[selectedSettingScope] || []).indexOf(boundary);
                     return (
                       <div key={idx} className="p-4 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-4 flex-1">
@@ -2403,9 +2475,9 @@ export default function App() {
                               className="w-14 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center font-bold text-indigo-600 text-center outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                               value={boundary.grade}
                               onChange={(e) => {
-                                const newBoundaries = [...(yearBoundaries[selectedYearForSettings] || [])];
+                                const newBoundaries = [...(yearBoundaries[selectedSettingScope] || [])];
                                 newBoundaries[originalIdx].grade = e.target.value;
-                                setYearBoundaries(prev => ({ ...prev, [selectedYearForSettings]: newBoundaries }));
+                                setYearBoundaries(prev => ({ ...prev, [selectedSettingScope]: newBoundaries }));
                               }}
                             />
                           </div>
@@ -2420,9 +2492,9 @@ export default function App() {
                                   value={boundary.minPercentage}
                                   onChange={(e) => {
                                     const val = parseInt(e.target.value) || 0;
-                                    const newBoundaries = [...(yearBoundaries[selectedYearForSettings] || [])];
+                                    const newBoundaries = [...(yearBoundaries[selectedSettingScope] || [])];
                                     newBoundaries[originalIdx].minPercentage = Math.min(100, Math.max(0, val));
-                                    setYearBoundaries(prev => ({ ...prev, [selectedYearForSettings]: newBoundaries }));
+                                    setYearBoundaries(prev => ({ ...prev, [selectedSettingScope]: newBoundaries }));
                                   }}
                                   className="w-14 px-1.5 py-0.5 text-right font-bold text-slate-900 border border-slate-200 rounded-md outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                                 />
@@ -2435,9 +2507,9 @@ export default function App() {
                               max="100" 
                               value={boundary.minPercentage}
                               onChange={(e) => {
-                                const newBoundaries = [...(yearBoundaries[selectedYearForSettings] || [])];
+                                const newBoundaries = [...(yearBoundaries[selectedSettingScope] || [])];
                                 newBoundaries[originalIdx].minPercentage = parseInt(e.target.value);
-                                setYearBoundaries(prev => ({ ...prev, [selectedYearForSettings]: newBoundaries }));
+                                setYearBoundaries(prev => ({ ...prev, [selectedSettingScope]: newBoundaries }));
                               }}
                               className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                             />
@@ -2446,7 +2518,7 @@ export default function App() {
                         <button 
                           onClick={() => setYearBoundaries(prev => ({
                             ...prev,
-                            [selectedYearForSettings]: prev[selectedYearForSettings].filter((_, i) => i !== originalIdx)
+                            [selectedSettingScope]: prev[selectedSettingScope].filter((_, i) => i !== originalIdx)
                           }))}
                           className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
                         >
@@ -2468,10 +2540,10 @@ export default function App() {
                 <button 
                   onClick={() => {
                     const newBoundaries = { ...yearBoundaries };
-                    (Object.keys(newBoundaries) as YearGroup[]).forEach(y => {
-                      if (typeof y === 'number') newBoundaries[y] = [...KS3_BOUNDARIES];
-                      else if (y.includes('IGCSE')) newBoundaries[y] = [...IGCSE_BOUNDARIES];
-                      else if (y.includes('IB')) newBoundaries[y] = [...IB_BOUNDARIES];
+                    Object.keys(newBoundaries).forEach(y => {
+                      if (typeof y === 'number' || !isNaN(parseInt(y as any))) newBoundaries[y] = [...KS3_BOUNDARIES];
+                      else if (String(y).includes('IGCSE')) newBoundaries[y] = [...IGCSE_BOUNDARIES];
+                      else if (String(y).includes('IB')) newBoundaries[y] = [...IB_BOUNDARIES];
                     });
                     setYearBoundaries(newBoundaries);
                   }}
@@ -2482,15 +2554,21 @@ export default function App() {
                 <button 
                   onClick={() => {
                     let defaults = KS3_BOUNDARIES;
-                    if (typeof selectedYearForSettings === 'string') {
-                      if (selectedYearForSettings.includes('IGCSE')) defaults = IGCSE_BOUNDARIES;
-                      else if (selectedYearForSettings.includes('IB')) defaults = IB_BOUNDARIES;
+                    const scope = selectedSettingScope;
+                    // Find which year group this scope belongs to
+                    let yearGroup: any = scope;
+                    const group = groups.find(g => g.name === scope);
+                    if (group) yearGroup = group.yearGroup;
+
+                    if (typeof yearGroup === 'string') {
+                      if (yearGroup.includes('IGCSE')) defaults = IGCSE_BOUNDARIES;
+                      else if (yearGroup.includes('IB')) defaults = IB_BOUNDARIES;
                     }
-                    setYearBoundaries(prev => ({ ...prev, [selectedYearForSettings]: [...defaults] }));
+                    setYearBoundaries(prev => ({ ...prev, [scope]: [...defaults] }));
                   }}
                   className="btn-secondary"
                 >
-                  Reset Year to Defaults
+                  Reset Scope to Defaults
                 </button>
                 <button 
                   onClick={() => {
@@ -2508,13 +2586,13 @@ export default function App() {
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h2 className="text-2xl font-bold text-slate-900 mb-2">Manage Groups</h2>
-                    <p className="text-slate-500">View and organize classes for Year {selectedYearForSettings}. Groups are automatically created when you import marks.</p>
+                    <p className="text-slate-500">View and organize classes for Year {selectedSettingScope}. Groups are automatically created when you import marks.</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   {groups
-                    .filter(g => g.yearGroup === selectedYearForSettings && g.academicYear === selectedAcademicYear)
+                    .filter(g => String(g.yearGroup) === String(selectedSettingScope) && g.academicYear === selectedAcademicYear)
                     .map((group) => (
                       <div key={group.id} className="card p-4 flex items-center gap-3 group">
                         <input 
@@ -2525,11 +2603,11 @@ export default function App() {
                             const newName = e.target.value;
                             setGroups(prev => prev.map(g => g.id === group.id ? { ...g, name: newName } : g));
                             // Also update students in this group
-                            setStudents(prev => prev.map(s => s.yearGroup === selectedYearForSettings && s.groupName === group.name ? { ...s, groupName: newName } : s));
+                            setStudents(prev => prev.map(s => String(s.yearGroup) === String(selectedSettingScope) && s.groupName === group.name ? { ...s, groupName: newName } : s));
                           }}
                         />
                         <button 
-                          onClick={() => setGroups(prev => prev.filter(g => g.id !== group.id))}
+                          onClick={() => handleDeleteGroup(group.id)}
                           className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -2806,7 +2884,7 @@ export default function App() {
                     {(() => {
                       const assessment = assessments.find(a => a.id === showMarksModal);
                       const relevantStudents = students.filter(s => {
-                        const matchesYear = assessment ? s.yearGroup === assessment.yearGroup : true;
+                        const matchesYear = assessment ? String(s.yearGroup) === String(assessment.yearGroup) : true;
                         const matchesGroup = marksGroupFilter === 'all' || s.groupName === marksGroupFilter;
                         return matchesYear && matchesGroup;
                       });
@@ -2864,11 +2942,11 @@ export default function App() {
                       Custom boundaries for this assessment. If not set, class defaults will be used.
                     </p>
                     <div className="space-y-3">
-                      {(assessments.find(a => a.id === showMarksModal)?.boundaries || yearBoundaries[assessments.find(a => a.id === showMarksModal)?.yearGroup || 7] || [])
+                      {(assessments.find(a => a.id === showMarksModal)?.boundaries || yearBoundaries[marksGroupFilter] || yearBoundaries[assessments.find(a => a.id === showMarksModal)?.yearGroup || 7] || [])
                         .sort((a, b) => b.minPercentage - a.minPercentage)
                         .map((boundary, idx) => {
                           const assessment = assessments.find(a => a.id === showMarksModal)!;
-                          const sourceBoundaries = assessment.boundaries || yearBoundaries[assessment.yearGroup] || [];
+                          const sourceBoundaries = assessment.boundaries || yearBoundaries[marksGroupFilter] || yearBoundaries[assessment.yearGroup] || [];
                           const originalIdx = sourceBoundaries.indexOf(boundary);
 
                           return (
