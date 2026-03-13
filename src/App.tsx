@@ -6,6 +6,7 @@ import {
   Plus, 
   Upload, 
   ChevronRight, 
+  ChevronDown,
   TrendingUp, 
   TrendingDown, 
   Minus,
@@ -37,7 +38,7 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
-import { getStudents, getAssessments, getMarks, getGroups } from './services/firebaseService';
+import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries } from './services/firebaseService';
 import { setDoc, doc } from 'firebase/firestore';
 import { db } from './firebase';
 import { 
@@ -166,6 +167,34 @@ export default function App() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const isFetching = React.useRef(false);
 
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['year-7'])); // Default Year 7 expanded
+
+  const toggleSection = (sectionId: string) => {
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (groupFilter !== 'all') {
+      // Find which year this group belongs to
+      const student = students.find(s => s.groupName === groupFilter && s.academicYear === selectedAcademicYear);
+      if (student) {
+        const yearSectionId = `year-${student.yearGroup}`;
+        const groupSectionId = `group-${student.yearGroup}-${groupFilter}`;
+        setExpandedSections(prev => {
+          const next = new Set(prev);
+          next.add(yearSectionId);
+          next.add(groupSectionId);
+          return next;
+        });
+      }
+    }
+  }, [groupFilter, students, selectedAcademicYear]);
+
   // Reset modal filters when modals are closed
   useEffect(() => {
     if (!showMarksModal) setMarksGroupFilter('all');
@@ -181,17 +210,21 @@ export default function App() {
       isFetching.current = true;
       try {
         console.log("Fetching data from Firebase...");
-        const [students, assessments, marks, groups] = await Promise.all([
+        const [students, assessments, marks, groups, fetchedBoundaries] = await Promise.all([
           getStudents(),
           getAssessments(),
           getMarks(),
-          getGroups()
+          getGroups(),
+          getYearBoundaries()
         ]);
-        console.log("Data fetched:", { students, assessments, marks, groups });
+        console.log("Data fetched:", { students, assessments, marks, groups, fetchedBoundaries });
         setStudents(students || []);
         setAssessments(assessments || []);
         setMarks(marks || []);
         setGroups(groups || []);
+        if (fetchedBoundaries) {
+          setYearBoundaries(fetchedBoundaries as Record<YearGroup, GradeBoundary[]>);
+        }
         setHasLoaded(true);
       } catch (error) {
         console.error("Failed to fetch data:", error);
@@ -210,12 +243,13 @@ export default function App() {
     const saveData = async () => {
       console.log("Saving data to Firebase...");
       try {
-        // Save all students, assessments, marks, groups to Firebase
+        // Save all students, assessments, marks, groups, and year boundaries to Firebase
         await Promise.all([
           ...students.map(s => setDoc(doc(db, 'students', s.id), s)),
           ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), a)),
           ...marks.map(m => setDoc(doc(db, 'marks', m.id), m)),
-          ...groups.map(g => setDoc(doc(db, 'groups', g.id), g))
+          ...groups.map(g => setDoc(doc(db, 'groups', g.id), g)),
+          updateYearBoundaries(yearBoundaries)
         ]);
         console.log("Data saved successfully.");
         setSaveStatus('saved');
@@ -1950,6 +1984,15 @@ export default function App() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
+                  <div className="flex items-center justify-between px-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Student List</span>
+                    <button 
+                      onClick={() => setExpandedSections(new Set())}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+                    >
+                      Collapse All
+                    </button>
+                  </div>
                 </div>
 
                 <div className="card max-h-[calc(100vh-250px)] overflow-y-auto divide-y divide-slate-100">
@@ -1968,11 +2011,20 @@ export default function App() {
                         
                         if (yearGroups.length === 0 && yearStudents.length === 0) return null;
                         
+                        const yearSectionId = `year-${year}`;
+                        const isYearExpanded = expandedSections.has(yearSectionId);
+                        
                         return (
                           <div key={year} className="bg-white">
-                            <div className="px-4 py-2 bg-slate-50 border-y border-slate-100 flex items-center justify-between group/year">
-                              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{typeof year === 'number' ? `Year ${year}` : year}</h4>
+                            <div 
+                              onClick={() => toggleSection(yearSectionId)}
+                              className="px-4 py-2 bg-slate-50 border-y border-slate-100 flex items-center justify-between group/year cursor-pointer hover:bg-slate-100 transition-colors"
+                            >
                               <div className="flex items-center gap-2">
+                                {isYearExpanded ? <ChevronDown className="w-3 h-3 text-slate-400" /> : <ChevronRight className="w-3 h-3 text-slate-400" />}
+                                <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{typeof year === 'number' ? `Year ${year}` : year}</h4>
+                              </div>
+                              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                 <select 
                                   className="bg-transparent text-[8px] font-bold text-slate-400 uppercase tracking-tighter outline-none cursor-pointer hover:text-rose-500 transition-colors"
                                   onChange={(e) => {
@@ -1990,13 +2042,22 @@ export default function App() {
                                 </select>
                               </div>
                             </div>
-                            {yearGroups.map(groupName => {
+                            {isYearExpanded && yearGroups.map(groupName => {
                               const groupStudents = yearStudents.filter(p => p.student.groupName === groupName);
+                              const groupSectionId = `group-${year}-${groupName}`;
+                              const isGroupExpanded = expandedSections.has(groupSectionId);
+
                               return (
                                 <div key={groupName}>
-                                  <div className="px-4 py-1.5 bg-white flex items-center justify-between group/header">
-                                    <h5 className="text-[9px] font-bold uppercase tracking-tighter text-indigo-400">Group {groupName}</h5>
+                                  <div 
+                                    onClick={() => toggleSection(groupSectionId)}
+                                    className="px-4 py-1.5 bg-white flex items-center justify-between group/header cursor-pointer hover:bg-slate-50 transition-colors"
+                                  >
                                     <div className="flex items-center gap-2">
+                                      {isGroupExpanded ? <ChevronDown className="w-2.5 h-2.5 text-indigo-300" /> : <ChevronRight className="w-2.5 h-2.5 text-indigo-300" />}
+                                      <h5 className="text-[9px] font-bold uppercase tracking-tighter text-indigo-400">Group {groupName}</h5>
+                                    </div>
+                                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                       {groupStudents.length > 0 && (
                                         <button 
                                           onClick={() => handleDeleteClass(year, groupName)}
@@ -2012,7 +2073,7 @@ export default function App() {
                                       )}
                                     </div>
                                   </div>
-                                  {groupStudents.map((p) => (
+                                  {isGroupExpanded && groupStudents.map((p) => (
                                     <button
                                       key={p.student.id}
                                       onClick={() => setSelectedStudentId(p.student.id)}
