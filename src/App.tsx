@@ -1497,7 +1497,7 @@ export default function App() {
         return yearGroup;
       })();
       // If row says a different year from import config, trust import config (handles data entry errors)
-      const effectiveYearGroup = String(rowYearGroup) === String(yearGroup) ? yearGroup : yearGroup;
+      let effectiveYearGroup = String(rowYearGroup) === String(yearGroup) ? yearGroup : yearGroup;
 
       // Read per-row subject and level (overrides the import config defaults for this row)
       const rowSubjectOverride = findValue(row, ['subject', 'subjects']);
@@ -1511,14 +1511,27 @@ export default function App() {
       const rowGroupName = rowGroupCol ? String(rowGroupCol).trim() : null;
       const effectiveGroupName = rowGroupName || rowSheetName || groupName;
 
+      // Derive year group from group name if possible (e.g., "10R" -> "10 IGCSE")
+      if (effectiveGroupName) {
+        const match = effectiveGroupName.match(/^(\d+)/);
+        if (match) {
+          const yearNum = parseInt(match[1]);
+          if (yearNum === 10) effectiveYearGroup = '10 IGCSE';
+          else if (yearNum === 11) effectiveYearGroup = '11 IGCSE';
+          else if (yearNum === 12) effectiveYearGroup = '12 IB';
+          else if (yearNum === 13) effectiveYearGroup = '13 IB';
+          else if (yearNum >= 7 && yearNum <= 9) effectiveYearGroup = yearNum as YearGroup;
+        }
+      }
+
       // Also ensure group record exists for this effectiveGroupName
       if (effectiveGroupName) {
-        const gKey = `${String(yearGroup)}|${effectiveGroupName}|${selectedAcademicYear}`;
+        const gKey = `${String(effectiveYearGroup)}|${effectiveGroupName}|${selectedAcademicYear}`;
         const groupKeys = new Set(newGroups.map(g => `${String(g.yearGroup)}|${g.name}|${g.academicYear}`));
         if (!groupKeys.has(gKey)) {
           newGroups.push({
             id: Math.random().toString(36).substr(2, 9),
-            yearGroup,
+            yearGroup: effectiveYearGroup,
             name: effectiveGroupName,
             academicYear: selectedAcademicYear
           });
@@ -1526,12 +1539,12 @@ export default function App() {
       }
 
       // Ensure student exists
-      let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === yearGroup && s.academicYear === selectedAcademicYear);
+      let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === effectiveYearGroup && s.academicYear === selectedAcademicYear);
       if (!student) {
         student = { 
           id: Math.random().toString(36).substr(2, 9), 
           name: studentName, 
-          yearGroup,
+          yearGroup: effectiveYearGroup,
           groupName: effectiveGroupName,
           academicYear: selectedAcademicYear
         } as any;
