@@ -2743,13 +2743,14 @@ export default function App() {
                               <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                 <select 
                                   className="bg-transparent text-[8px] font-bold text-slate-400 uppercase tracking-tighter outline-none cursor-pointer hover:text-rose-500 transition-colors"
+                                  defaultValue=""
                                   onChange={(e) => {
-                                    if (e.target.value) {
-                                      handleDeleteClass(year, e.target.value);
-                                      e.target.value = ''; // Reset
+                                    const val = e.target.value;
+                                    if (val) {
+                                      handleDeleteClass(year, val);
+                                      e.target.value = ''; // Reset after delete
                                     }
                                   }}
-                                  value=""
                                 >
                                   <option value="" disabled>Bulk Delete Class</option>
                                   {yearGroups.map(g => (
