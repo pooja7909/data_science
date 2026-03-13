@@ -1818,12 +1818,10 @@ export default function App() {
     } else {
       alert('Import complete — no new data detected. Check that student names match exactly and column headers include max marks e.g. "Test 1 (50)".');
     }
-    } catch(e: any) { console.error('confirmImport error:', e); alert('Import error: ' + e.message); }
   };
 
   // Dry-run the import to show a preview of what will be created/updated
   const previewImport = () => {
-    try {
     if (!pendingImport) return;
     const { data } = pendingImport;
     const { yearGroup, subject: defaultSubject, maxMarks: defaultMaxMarks } = importConfig;
@@ -1935,7 +1933,6 @@ export default function App() {
       marks: markCount,
       groups: Array.from(detectedGroups).sort()
     });
-    } catch(e: any) { console.error('previewImport error:', e); alert('Preview error: ' + e.message); }
   };
 
   const handleAddAssessment = (e: React.FormEvent) => {
@@ -4439,13 +4436,13 @@ export default function App() {
                   Cancel
                 </button>
                 <button 
-                  onClick={previewImport}
+                  onClick={() => { console.log('Preview clicked'); previewImport(); }}
                   className="btn-secondary flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
                 >
                   Preview
                 </button>
                 <button 
-                  onClick={() => { confirmImport(); }}
+                  onClick={() => { console.log('Import clicked'); confirmImport().catch(e => { console.error('Import failed:', e); alert('Import error: ' + e.message); }); }}
                   className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                   disabled={
                     !importPreview ||
