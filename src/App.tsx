@@ -2726,7 +2726,7 @@ export default function App() {
                       .map(year => {
                         const yearStudents = filteredPerformances.filter(p => p.student.yearGroup === year);
                         // Only show groups that have actual students (prevents ghost/deleted groups)
-                        const yearGroups = Array.from(new Set(yearStudents.map(p => p.student.groupName))).filter(Boolean).sort();
+                        const yearGroups = (Array.from(new Set(yearStudents.map(p => p.student.groupName))).filter(Boolean) as string[]).sort((a, b) => a.localeCompare(b));
                         
                         if (yearGroups.length === 0 && yearStudents.length === 0) return null;
                         
