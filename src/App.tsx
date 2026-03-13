@@ -381,8 +381,12 @@ export default function App() {
   const availableGroups = useMemo(() => {
     const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
     const filteredByYear = currentYearStudents.filter(s => matchesYearFilter(s.yearGroup, yearFilter));
-    return Array.from(new Set(filteredByYear.map(s => s.groupName))).filter(Boolean).sort();
-  }, [students, selectedAcademicYear, yearFilter]);
+    const existingGroupNames = new Set(groups.map(g => g.name));
+    return Array.from(new Set(filteredByYear.map(s => s.groupName)))
+      .filter(Boolean)
+      .filter(name => existingGroupNames.has(name))
+      .sort();
+  }, [students, selectedAcademicYear, yearFilter, groups]);
 
   const topPerformers = useMemo(() => {
     return [...filteredPerformances]
