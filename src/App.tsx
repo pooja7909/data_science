@@ -215,6 +215,20 @@ export default function App() {
     if (!showPaperGradingModal) setModalGroupFilter('all');
   }, [showPaperGradingModal]);
 
+  // #8: Escape key closes any open modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showMarksModal) { setShowMarksModal(null); return; }
+      if (showPaperGradingModal) { setShowPaperGradingModal(null); return; }
+      if (showAssessmentModal) { setShowAssessmentModal(false); setEditingAssessmentId(null); return; }
+      if (showStudentModal) { setShowStudentModal(false); return; }
+      if (showImportModal) { setShowImportModal(false); setPendingImport(null); return; }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showMarksModal, showPaperGradingModal, showAssessmentModal, showStudentModal, showImportModal]);
+
   // Fetch data on mount
   useEffect(() => {
     const fetchData = async () => {
@@ -2227,7 +2241,9 @@ export default function App() {
                               </div>
                             </div>
                             {isYearExpanded && yearGroups.map(groupName => {
-                              const groupStudents = yearStudents.filter(p => p.student.groupName === groupName);
+                              const groupStudents = yearStudents
+                                .filter(p => p.student.groupName === groupName)
+                                .sort((a, b) => a.student.name.localeCompare(b.student.name));
                               const groupSectionId = `group-${year}-${groupName}`;
                               const isGroupExpanded = expandedSections.has(groupSectionId);
 
@@ -2499,26 +2515,51 @@ export default function App() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center justify-between mt-6 pt-4 border-t border-slate-50">
-                      <div className="text-sm">
-                        <span className="text-slate-500">Max Marks:</span>
-                        <span className="ml-1 font-bold text-slate-900">{assessment.maxMarks}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <button 
-                          onClick={() => setShowMarksModal(assessment.id)}
-                          className="text-indigo-600 text-sm font-bold flex items-center gap-1 hover:gap-2 transition-all"
-                        >
-                          Manage Marks <ChevronRight className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => setShowPaperGradingModal(assessment.id)}
-                          className="text-emerald-600 text-sm font-bold flex items-center gap-1 hover:gap-2 transition-all"
-                        >
-                          Grade by Question <FileText className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
+                    {(() => {
+                      const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
+                      const totalStudents = students.filter(s => String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === assessment.academicYear).length;
+                      const markedCount = assessmentMarks.length;
+                      const avg = markedCount > 0
+                        ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / markedCount
+                        : null;
+                      const unmarkedCount = totalStudents - markedCount;
+                      return (
+                        <div className="mt-4 pt-4 border-t border-slate-50 space-y-3">
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-slate-50 rounded-lg p-2">
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">Max Marks</p>
+                              <p className="text-sm font-bold text-slate-900">{assessment.maxMarks}</p>
+                            </div>
+                            <div className={`rounded-lg p-2 ${avg !== null ? 'bg-indigo-50' : 'bg-slate-50'}`}>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">Class Avg</p>
+                              <p className={`text-sm font-bold ${avg !== null ? 'text-indigo-600' : 'text-slate-400'}`}>
+                                {avg !== null ? `${avg.toFixed(1)}%` : '—'}
+                              </p>
+                            </div>
+                            <div className={`rounded-lg p-2 ${unmarkedCount > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">Marked</p>
+                              <p className={`text-sm font-bold ${unmarkedCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                {markedCount}/{totalStudents}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              onClick={() => setShowMarksModal(assessment.id)}
+                              className="flex-1 text-indigo-600 text-sm font-bold flex items-center justify-center gap-1 hover:gap-2 transition-all"
+                            >
+                              Manage Marks <ChevronRight className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => setShowPaperGradingModal(assessment.id)}
+                              className="flex-1 text-emerald-600 text-sm font-bold flex items-center justify-center gap-1 hover:gap-2 transition-all"
+                            >
+                              Grade by Question <FileText className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -3017,28 +3058,41 @@ export default function App() {
                           <div key={groupName} className="mb-6">
                             <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-2">
                               <h5 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">Group {groupName || 'Unassigned'}</h5>
-                              <span className="text-[9px] text-slate-400 font-bold">{groupStudents.length} Students</span>
+                              <div className="flex items-center gap-2">
+                                {(() => {
+                                  const unmarked = groupStudents.filter(s => !marks.find(m => m.studentId === s.id && m.assessmentId === showMarksModal)).length;
+                                  return unmarked > 0 ? (
+                                    <span className="text-[9px] font-bold text-amber-500">{unmarked} unmarked</span>
+                                  ) : (
+                                    <span className="text-[9px] font-bold text-emerald-500">All marked ✓</span>
+                                  );
+                                })()}
+                                <span className="text-[9px] text-slate-400 font-bold">{groupStudents.length} students</span>
+                              </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                               {groupStudents.map(student => {
                                 const mark = marks.find(m => m.studentId === student.id && m.assessmentId === showMarksModal);
                                 return (
-                                  <div key={student.id} className="flex items-center justify-between p-1.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                                  <div key={student.id} className={`flex items-center justify-between p-1.5 rounded-lg border shadow-sm ${mark === undefined ? 'bg-amber-50 border-amber-100' : 'bg-white border-slate-100'}`}>
                                     <div className="min-w-0 flex-1 mr-2">
                                       <p className="font-bold text-slate-900 text-[11px] truncate">{student.name}</p>
+                                      {mark === undefined && (
+                                        <span className="text-[8px] font-bold text-amber-500 uppercase tracking-wide">Not marked</span>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                       <input 
                                         type="number" 
                                         placeholder="Score"
-                                        className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500"
+                                        className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'}`}
                                         value={mark?.score ?? ''}
                                         min="0"
                                         max={assessment?.maxMarks || 100}
                                         onChange={e => handleUpdateMark(student.id, showMarksModal, parseFloat(e.target.value) || 0)}
                                       />
-                                      <span className="text-[9px] font-bold text-slate-400 w-7 text-right">
-                                        {mark ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '-%'}
+                                      <span className={`text-[9px] font-bold w-7 text-right ${mark === undefined ? 'text-amber-400' : 'text-slate-400'}`}>
+                                        {mark !== undefined ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '—'}
                                       </span>
                                     </div>
                                   </div>
