@@ -168,6 +168,7 @@ export default function App() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const isFetching = React.useRef(false);
+  const isImporting = React.useRef(false); // blocks orphan cleanup during import
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['year-7'])); // Default Year 7 expanded
 
@@ -390,7 +391,7 @@ export default function App() {
   // Cleanup orphaned groups (groups with no students) from Firestore and local state
   // Runs across ALL academic years so old ghost groups get purged regardless of selected year
   useEffect(() => {
-    if (!hasLoaded || groups.length === 0) return;
+    if (!hasLoaded || groups.length === 0 || isImporting.current) return;
     // Normalise yearGroup to string before comparing, to avoid race with migrateYear effect
     // e.g. numeric 10 and string "10 IGCSE" both normalise consistently
     const normaliseYG = (y: any): string => {
@@ -1783,10 +1784,15 @@ export default function App() {
       console.error('Import save failed:', saveError);
     }
 
+    // Block orphan cleanup while we update all state together
+    // (prevents race where new groups appear orphaned before students are updated)
+    isImporting.current = true;
     setGroups(newGroups);
     setStudents(newStudents);
     setAssessments(newAssessments);
     setMarks(newMarks);
+    // Release the block after React has processed all state updates
+    setTimeout(() => { isImporting.current = false; }, 100);
     
     const newStudentCount = newStudents.length - students.length;
     const newAssessmentCount = newAssessments.length - assessments.length;
