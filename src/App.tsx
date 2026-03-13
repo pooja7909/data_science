@@ -156,6 +156,7 @@ export default function App() {
   const [newStudent, setNewStudent] = useState({ name: '', yearGroup: 7 as YearGroup, groupName: '' });
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
+  const [modalGroupFilter, setModalGroupFilter] = useState<string>('all');
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
   const [showPaperGradingModal, setShowPaperGradingModal] = useState<string | null>(null);
   const [extractionMode, setExtractionMode] = useState<'questions' | 'subparts'>('questions');
@@ -164,6 +165,15 @@ export default function App() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const isFetching = React.useRef(false);
+
+  // Reset modal filters when modals are closed
+  useEffect(() => {
+    if (!showMarksModal) setMarksGroupFilter('all');
+  }, [showMarksModal]);
+
+  useEffect(() => {
+    if (!showPaperGradingModal) setModalGroupFilter('all');
+  }, [showPaperGradingModal]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -595,6 +605,32 @@ export default function App() {
   const handlePaperUpload = async (e: React.ChangeEvent<HTMLInputElement>, assessmentId: string) => {
     // Paper upload functionality removed
     console.log("Paper upload functionality disabled.");
+  };
+
+  const deleteStudent = (studentId: string) => {
+    if (confirm('Are you sure you want to delete this student?')) {
+      setStudents(prev => prev.filter(s => s.id !== studentId));
+      setMarks(prev => prev.filter(m => m.studentId !== studentId));
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
+  };
+
+  const handleDeleteClass = (year: YearGroup, groupName: string) => {
+    if (confirm(`Are you sure you want to delete all students in ${groupName} (Year ${year})?`)) {
+      const studentsToDelete = students.filter(s => 
+        s.yearGroup === year && 
+        s.groupName === groupName && 
+        s.academicYear === selectedAcademicYear
+      );
+      const studentIds = new Set(studentsToDelete.map(s => s.id));
+      
+      setStudents(prev => prev.filter(s => !studentIds.has(s.id)));
+      setMarks(prev => prev.filter(m => !studentIds.has(m.studentId)));
+      
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
   };
 
   const handleBulkStudentImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1934,18 +1970,47 @@ export default function App() {
                         
                         return (
                           <div key={year} className="bg-white">
-                            <div className="px-4 py-2 bg-slate-50 border-y border-slate-100">
+                            <div className="px-4 py-2 bg-slate-50 border-y border-slate-100 flex items-center justify-between group/year">
                               <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{typeof year === 'number' ? `Year ${year}` : year}</h4>
+                              <div className="flex items-center gap-2">
+                                <select 
+                                  className="bg-transparent text-[8px] font-bold text-slate-400 uppercase tracking-tighter outline-none cursor-pointer hover:text-rose-500 transition-colors"
+                                  onChange={(e) => {
+                                    if (e.target.value) {
+                                      handleDeleteClass(year, e.target.value);
+                                      e.target.value = ''; // Reset
+                                    }
+                                  }}
+                                  value=""
+                                >
+                                  <option value="" disabled>Bulk Delete Class</option>
+                                  {yearGroups.map(g => (
+                                    <option key={g} value={g}>Delete Group {g}</option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
                             {yearGroups.map(groupName => {
                               const groupStudents = yearStudents.filter(p => p.student.groupName === groupName);
                               return (
                                 <div key={groupName}>
-                                  <div className="px-4 py-1.5 bg-white flex items-center justify-between">
+                                  <div className="px-4 py-1.5 bg-white flex items-center justify-between group/header">
                                     <h5 className="text-[9px] font-bold uppercase tracking-tighter text-indigo-400">Group {groupName}</h5>
-                                    {groupStudents.length === 0 && (
-                                      <span className="text-[8px] text-slate-300 italic">Empty</span>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                      {groupStudents.length > 0 && (
+                                        <button 
+                                          onClick={() => handleDeleteClass(year, groupName)}
+                                          className="opacity-0 group-hover/header:opacity-100 flex items-center gap-1 text-[8px] font-bold text-rose-500 hover:text-rose-600 transition-all"
+                                          title="Delete all students in this class"
+                                        >
+                                          <Trash2 className="w-2.5 h-2.5" />
+                                          Delete Class
+                                        </button>
+                                      )}
+                                      {groupStudents.length === 0 && (
+                                        <span className="text-[8px] text-slate-300 italic">Empty</span>
+                                      )}
+                                    </div>
                                   </div>
                                   {groupStudents.map((p) => (
                                     <button
@@ -2677,40 +2742,56 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto pr-2">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {students
-                        .filter(s => {
-                          const assessment = assessments.find(a => a.id === showMarksModal);
-                          const matchesYear = assessment ? s.yearGroup === assessment.yearGroup : true;
-                          const matchesGroup = marksGroupFilter === 'all' || s.groupName === marksGroupFilter;
-                          return matchesYear && matchesGroup;
-                        })
-                        .map(student => {
-                          const mark = marks.find(m => m.studentId === student.id && m.assessmentId === showMarksModal);
-                          return (
-                            <div key={student.id} className="flex items-center justify-between p-1.5 bg-slate-50 rounded-lg border border-slate-100">
-                              <div className="min-w-0 flex-1 mr-2">
-                                <p className="font-bold text-slate-900 text-[11px] truncate">{student.name}</p>
-                                <p className="text-[9px] text-slate-500 truncate">{student.groupName}</p>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <input 
-                                  type="number" 
-                                  placeholder="Score"
-                                  className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500"
-                                  value={mark?.score ?? ''}
-                                  min="0"
-                                  max={assessments.find(a => a.id === showMarksModal)?.maxMarks || 100}
-                                  onChange={e => handleUpdateMark(student.id, showMarksModal, parseFloat(e.target.value) || 0)}
-                                />
-                                <span className="text-[9px] font-bold text-slate-400 w-7 text-right">
-                                  {mark ? `${((mark.score / (assessments.find(a => a.id === showMarksModal)?.maxMarks || 1)) * 100).toFixed(0)}%` : '-%'}
-                                </span>
-                              </div>
+                    {(() => {
+                      const assessment = assessments.find(a => a.id === showMarksModal);
+                      const relevantStudents = students.filter(s => {
+                        const matchesYear = assessment ? s.yearGroup === assessment.yearGroup : true;
+                        const matchesGroup = marksGroupFilter === 'all' || s.groupName === marksGroupFilter;
+                        return matchesYear && matchesGroup;
+                      });
+                      const groupNames = Array.from(new Set(relevantStudents.map(s => s.groupName))).sort();
+
+                      return groupNames.map(groupName => {
+                        const groupStudents = relevantStudents
+                          .filter(s => s.groupName === groupName)
+                          .sort((a, b) => a.name.localeCompare(b.name));
+                        
+                        return (
+                          <div key={groupName} className="mb-6">
+                            <div className="flex items-center justify-between px-2 py-1 bg-slate-100 rounded-lg mb-2">
+                              <h5 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">Group {groupName || 'Unassigned'}</h5>
+                              <span className="text-[9px] text-slate-400 font-bold">{groupStudents.length} Students</span>
                             </div>
-                          );
-                        })}
-                    </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              {groupStudents.map(student => {
+                                const mark = marks.find(m => m.studentId === student.id && m.assessmentId === showMarksModal);
+                                return (
+                                  <div key={student.id} className="flex items-center justify-between p-1.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                                    <div className="min-w-0 flex-1 mr-2">
+                                      <p className="font-bold text-slate-900 text-[11px] truncate">{student.name}</p>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <input 
+                                        type="number" 
+                                        placeholder="Score"
+                                        className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500"
+                                        value={mark?.score ?? ''}
+                                        min="0"
+                                        max={assessment?.maxMarks || 100}
+                                        onChange={e => handleUpdateMark(student.id, showMarksModal, parseFloat(e.target.value) || 0)}
+                                      />
+                                      <span className="text-[9px] font-bold text-slate-400 w-7 text-right">
+                                        {mark ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '-%'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
                 <div className="flex flex-col overflow-hidden">
@@ -2906,6 +2987,22 @@ export default function App() {
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Filter Group</span>
+                          <select 
+                            className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                            value={modalGroupFilter}
+                            onChange={(e) => setModalGroupFilter(e.target.value)}
+                          >
+                            <option value="all">All Groups</option>
+                            {Array.from(new Set(students
+                              .filter(s => s.academicYear === selectedAcademicYear && s.yearGroup === assessments.find(a => a.id === showPaperGradingModal)?.yearGroup)
+                              .map(s => s.groupName)
+                            )).sort().map(g => (
+                              <option key={g} value={g}>{g || 'Unassigned'}</option>
+                            ))}
+                          </select>
+                        </div>
                         <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl">
                           <button 
                             onClick={() => setExtractionMode('questions')}
@@ -2948,44 +3045,66 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {students
-                            .filter(s => s.academicYear === selectedAcademicYear && s.yearGroup === assessments.find(a => a.id === showPaperGradingModal)?.yearGroup)
-                            .sort((a, b) => a.name.localeCompare(b.name))
-                            .map(student => {
-                              const mark = marks.find(m => m.studentId === student.id && m.assessmentId === showPaperGradingModal);
-                              const assessment = assessments.find(a => a.id === showPaperGradingModal)!;
+                          {(() => {
+                            const assessment = assessments.find(a => a.id === showPaperGradingModal)!;
+                            const relevantStudents = students.filter(s => 
+                              s.academicYear === selectedAcademicYear && 
+                              s.yearGroup === assessment.yearGroup &&
+                              (modalGroupFilter === 'all' || s.groupName === modalGroupFilter)
+                            );
+                            const groupNames = Array.from(new Set(relevantStudents.map(s => s.groupName))).sort();
+                            
+                            return groupNames.map(groupName => {
+                              const groupStudents = relevantStudents
+                                .filter(s => s.groupName === groupName)
+                                .sort((a, b) => a.name.localeCompare(b.name));
                               
                               return (
-                                <tr key={student.id} className="hover:bg-slate-50/50 transition-colors group">
-                                  <td className="px-4 py-3">
-                                    <div className="font-bold text-slate-900 text-sm">{student.name}</div>
-                                    <div className="text-[10px] text-slate-400">{student.groupName}</div>
-                                  </td>
-                                  {assessment.questions?.map(q => (
-                                    <td key={q.number} className="px-3 py-3 text-center">
-                                      <input 
-                                        type="number"
-                                        min="0"
-                                        max={q.maxMarks}
-                                        className="w-14 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm text-center font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                                        value={mark?.questionScores?.[q.number] ?? ''}
-                                        onChange={(e) => updateQuestionScore(student.id, assessment.id, q.number, parseFloat(e.target.value) || 0)}
-                                      />
+                                <React.Fragment key={groupName}>
+                                  <tr className="bg-slate-50/50">
+                                    <td 
+                                      colSpan={(assessment.questions?.length || 0) + 2} 
+                                      className="px-4 py-1.5 text-[10px] font-bold text-indigo-500 uppercase tracking-widest border-y border-slate-100"
+                                    >
+                                      Group {groupName || 'Unassigned'}
                                     </td>
-                                  ))}
-                                  <td className="px-4 py-3 text-right">
-                                    <div className="flex flex-col items-end">
-                                      <span className="text-sm font-bold text-indigo-600">
-                                        {mark?.score ?? 0} / {assessment.maxMarks}
-                                      </span>
-                                      <span className="text-[10px] font-bold text-slate-400">
-                                        {mark ? ((mark.score / assessment.maxMarks) * 100).toFixed(1) : '0.0'}%
-                                      </span>
-                                    </div>
-                                  </td>
-                                </tr>
+                                  </tr>
+                                  {groupStudents.map(student => {
+                                    const mark = marks.find(m => m.studentId === student.id && m.assessmentId === showPaperGradingModal);
+                                    return (
+                                      <tr key={student.id} className="hover:bg-slate-50/50 transition-colors group">
+                                        <td className="px-4 py-3">
+                                          <div className="font-bold text-slate-900 text-sm">{student.name}</div>
+                                        </td>
+                                        {assessment.questions?.map(q => (
+                                          <td key={q.number} className="px-3 py-3 text-center">
+                                            <input 
+                                              type="number"
+                                              min="0"
+                                              max={q.maxMarks}
+                                              className="w-14 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm text-center font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                                              value={mark?.questionScores?.[q.number] ?? ''}
+                                              onChange={(e) => updateQuestionScore(student.id, assessment.id, q.number, parseFloat(e.target.value) || 0)}
+                                            />
+                                          </td>
+                                        ))}
+                                        <td className="px-4 py-3 text-right">
+                                          <div className="flex flex-col items-end">
+                                            <span className="text-sm font-bold text-indigo-600">
+                                              {mark?.score ?? 0} / {assessment.maxMarks}
+                                            </span>
+                                            <span className="text-[10px] font-bold text-slate-400">
+                                              {mark ? ((mark.score / assessment.maxMarks) * 100).toFixed(1) : '0.0'}%
+                                            </span>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </React.Fragment>
                               );
-                            })}
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
