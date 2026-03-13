@@ -1513,11 +1513,10 @@ export default function App() {
       const rowSubjectOverride = findValue(row, ['subject', 'subjects']);
       const rowLevel = normalizeLevel(findValue(row, ['level', 'ib level', 'iblevel']));
 
-      // Use the per-row sheet name as the group name when data came from multiple sheets,
-      // so "10R" and "10S" sheets are kept as separate groups rather than merged into one.
-      const effectiveGroupName = (rowSheetName && rowSheetName !== defaultSheetName)
-        ? rowSheetName
-        : groupName;
+      // Always use the sheet name as the group name for Excel imports.
+      // Every sheet (10R, 10S, 7W...) becomes its own distinct group.
+      // Falls back to importConfig groupName only for CSV (no __sheetName tag).
+      const effectiveGroupName = rowSheetName ? rowSheetName : groupName;
 
       // Also ensure group record exists for this effectiveGroupName
       if (effectiveGroupName) {
