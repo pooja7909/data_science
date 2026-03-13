@@ -1196,6 +1196,15 @@ export default function App() {
       return foundKey ? row[foundKey] : undefined;
     };
 
+    // Helper: normalise level value to 'HL' | 'SL' | undefined
+    const normalizeLevel = (val: any): 'HL' | 'SL' | undefined => {
+      if (!val) return undefined;
+      const s = String(val).trim().toUpperCase();
+      if (s === 'HL' || s === 'HIGHER' || s === 'HIGHER LEVEL') return 'HL';
+      if (s === 'SL' || s === 'STANDARD' || s === 'STANDARD LEVEL') return 'SL';
+      return undefined;
+    };
+
     const extractInfo = (header: string, rowData?: any, sheetName?: string) => {
       let name = header;
       let maxMarks = defaultMaxMarks;
@@ -1255,6 +1264,10 @@ export default function App() {
 
       const rowSheetName = row.__sheetName || defaultSheetName;
 
+      // Read per-row subject and level (overrides the import config defaults for this row)
+      const rowSubjectOverride = findValue(row, ['subject', 'subjects']);
+      const rowLevel = normalizeLevel(findValue(row, ['level', 'ib level', 'iblevel']));
+
       // Ensure student exists
       let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === yearGroup && s.academicYear === selectedAcademicYear);
       if (!student) {
@@ -1264,10 +1277,26 @@ export default function App() {
           yearGroup,
           groupName,
           academicYear: selectedAcademicYear
-        };
+        } as any;
         newStudents.push(student);
       } else if (student.groupName !== groupName) {
         student.groupName = groupName;
+      }
+
+      // Store subject level on student if provided (e.g. Physics: HL)
+      if (rowSubjectOverride && rowLevel) {
+        const subjectKey = rowSubjectOverride.trim();
+        const existing = (student as any).subjectLevels || {};
+        (student as any).subjectLevels = { ...existing, [subjectKey]: rowLevel };
+      }
+
+      // Update subjects list on student from this row's subject
+      if (rowSubjectOverride) {
+        const subj = rowSubjectOverride.trim();
+        const existingSubjects: string[] = (student as any).subjects || [];
+        if (!existingSubjects.includes(subj)) {
+          (student as any).subjects = [...existingSubjects, subj];
+        }
       }
 
       if (hasAssessmentNameColumn) {
@@ -1312,7 +1341,8 @@ export default function App() {
           const rowScoreRaw = parseFloat(row[col]) || 0;
           const { name: rowAssessmentName, maxMarks: rowMaxMarks } = extractInfo(col, isFirstRowSubHeader ? firstRow : null, rowSheetName);
           const rowScore = Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
-          const rowSubject = defaultSubject;
+          // Use per-row subject if provided (e.g. from Subject column), else fall back to import config
+          const rowSubject = rowSubjectOverride ? rowSubjectOverride.trim() : defaultSubject;
           const rowDate = defaultDate;
 
           let assessment = newAssessments.find(a => a.name.trim().toLowerCase() === rowAssessmentName.trim().toLowerCase() && a.yearGroup === yearGroup && a.subject === rowSubject && a.academicYear === selectedAcademicYear);
@@ -1413,11 +1443,13 @@ export default function App() {
     const studentSubjects = (newStudent as any).subjects?.length
       ? (newStudent as any).subjects
       : SUBJECTS_BY_YEAR[newStudent.yearGroup] || [];
+    const studentSubjectLevels = (newStudent as any).subjectLevels || {};
     const student = {
       id: Math.random().toString(36).substr(2, 9),
       ...newStudent,
       academicYear: selectedAcademicYear,
-      subjects: studentSubjects
+      subjects: studentSubjects,
+      ...(Object.keys(studentSubjectLevels).length > 0 && { subjectLevels: studentSubjectLevels })
     };
     setStudents(prev => [...prev, student as Student]);
     setShowStudentModal(false);
@@ -2312,12 +2344,21 @@ export default function App() {
                                       }`}
                                     >
                                       <div className="flex items-center gap-2">
-                                        <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] ${
+                                        <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
                                           selectedStudentId === p.student.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
                                         }`}>
-                                          {p.student.name.split(' ').map(n => n[0]).join('')}
+                                          {p.student.name.split(' ').map((n: string) => n[0]).join('')}
                                         </div>
-                                        <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">{p.student.name}</p>
+                                        <div className="min-w-0">
+                                          <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">{p.student.name}</p>
+                                          {/* Show HL/SL summary for IB students */}
+                                          {(p.student as any).subjectLevels && Object.keys((p.student as any).subjectLevels).length > 0 && (
+                                            <p className="text-[8px] text-slate-400 truncate max-w-[100px]">
+                                              {Object.entries((p.student as any).subjectLevels as Record<string,string>)
+                                                .map(([s, l]) => `${s.split(' ')[0]} ${l}`).join(' · ')}
+                                            </p>
+                                          )}
+                                        </div>
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         <span className={`text-[8px] px-1 py-0.5 rounded-full border font-bold ${getStatusColor(p.status)}`}>
@@ -2356,7 +2397,25 @@ export default function App() {
                           <div className="flex items-center justify-between mb-8">
                             <div>
                               <h2 className="text-2xl font-bold text-slate-900">{p.student.name}</h2>
-                              <p className="text-slate-500">{formatYearGroup(p.student.yearGroup)} • Overall Average: {p.averagePercentage.toFixed(1)}%</p>
+                              <p className="text-slate-500">{formatYearGroup(p.student.yearGroup)} • {p.student.groupName} • Overall Average: {p.averagePercentage.toFixed(1)}%</p>
+                              {/* HL/SL subject level badges for IB students */}
+                              {(p.student as any).subjectLevels && Object.keys((p.student as any).subjectLevels).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                  {Object.entries((p.student as any).subjectLevels as Record<string, string>).map(([subject, level]) => (
+                                    <span 
+                                      key={subject}
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                        level === 'HL' 
+                                          ? 'bg-violet-50 text-violet-700 border-violet-200' 
+                                          : 'bg-sky-50 text-sky-700 border-sky-200'
+                                      }`}
+                                    >
+                                      <span style={{ color: SUBJECT_COLORS[subject] || '#6366f1' }}>●</span>
+                                      {subject} <span className="opacity-75">{level}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -3054,6 +3113,45 @@ export default function App() {
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">Click to toggle — all selected by default</p>
                 </div>
+                {/* HL/SL level selector — only for IB years */}
+                {(newStudent.yearGroup === '12 IB' || newStudent.yearGroup === '13 IB') && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Subject Levels (HL / SL)</label>
+                    <div className="space-y-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
+                      {((newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map((subject: string) => {
+                        const subjectLevels = (newStudent as any).subjectLevels || {};
+                        const currentLevel = subjectLevels[subject] || 'SL';
+                        return (
+                          <div key={subject} className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-slate-700" style={{ color: SUBJECT_COLORS[subject] }}>
+                              {subject}
+                            </span>
+                            <div className="flex gap-1">
+                              {(['HL', 'SL'] as const).map(level => (
+                                <button
+                                  key={level}
+                                  type="button"
+                                  onClick={() => {
+                                    const existing = (newStudent as any).subjectLevels || {};
+                                    setNewStudent({ ...newStudent, subjectLevels: { ...existing, [subject]: level } } as any);
+                                  }}
+                                  className={`px-3 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
+                                    currentLevel === level
+                                      ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
+                                      : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                                  }`}
+                                >
+                                  {level}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">Default is SL — click HL to change</p>
+                  </div>
+                )}
                 <div className="flex gap-3 pt-4">
                   <button type="button" onClick={() => setShowStudentModal(false)} className="btn-secondary flex-1">Cancel</button>
                   <button type="submit" className="btn-primary flex-1">Add Student</button>
@@ -3152,7 +3250,20 @@ export default function App() {
                                 return (
                                   <div key={student.id} className={`flex items-center justify-between p-1.5 rounded-lg border shadow-sm ${mark === undefined ? 'bg-amber-50 border-amber-100' : 'bg-white border-slate-100'}`}>
                                     <div className="min-w-0 flex-1 mr-2">
-                                      <p className="font-bold text-slate-900 text-[11px] truncate">{student.name}</p>
+                                      <div className="flex items-center gap-1 flex-wrap">
+                                        <p className="font-bold text-slate-900 text-[11px] truncate">{student.name}</p>
+                                        {/* Show HL/SL badge for the subject of this assessment */}
+                                        {(() => {
+                                          const assessmentSubject = assessments.find(a => a.id === showMarksModal)?.subject;
+                                          const level = assessmentSubject && (student as any).subjectLevels?.[assessmentSubject];
+                                          if (!level) return null;
+                                          return (
+                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border flex-shrink-0 ${
+                                              level === 'HL' ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-sky-50 text-sky-700 border-sky-200'
+                                            }`}>{level}</span>
+                                          );
+                                        })()}
+                                      </div>
                                       {mark === undefined && (
                                         <span className="text-[8px] font-bold text-amber-500 uppercase tracking-wide">Not marked</span>
                                       )}
