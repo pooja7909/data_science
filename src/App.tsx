@@ -1823,7 +1823,6 @@ setGroups(Array.isArray(groups) ? groups : []);
 
   // Dry-run the import to show a preview of what will be created/updated
  const previewImport = () => {
-  try {
     console.log("Preview triggered:", pendingImport);
 
     if (!pendingImport || !importConfig) return;
