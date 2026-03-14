@@ -1827,7 +1827,7 @@ export default function App() {
       if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
         colSubjects[col] = allSubjects.find(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())!;
       } else {
-        colSubjects[col] = ''; // needs user to assign
+        colSubjects[col] = defaultSubject; // Default to importConfig.subject
       }
     });
     setImportColumnSubjects(colSubjects);
