@@ -1251,101 +1251,124 @@ export default function App() {
     XLSX.writeFile(wb, 'Assessment_Marks_Template.xlsx');
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const fileName = file.name.replace(/\.[^/.]+$/, "");
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length === 0) return;
+
+    const allData: any[] = [];
+    let fileName = files[0].name.replace(/\.[^/.]+$/, "");
+    if (files.length > 1) fileName = "Multiple Files";
+
+    const processData = (data: any[], sheetName?: string) => {
+      if (data.length === 0) return;
+
+      const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
+      const metadataHeaders = [
+        'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
+        'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname'
+      ].map(h => h.toLowerCase().replace(/[\s_]/g, ''));
+
+      const hasAssessmentNameColumn = headers.some(h => h.toLowerCase().replace(/[\s_]/g, '') === 'assessmentname');
+      
+      const extraColumns = headers.filter(h => {
+        if (metadataHeaders.includes(h.toLowerCase().replace(/[\s_]/g, ''))) return false;
+        
+        return data.some((row: any) => {
+          const val = row[h];
+          return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
+        });
+      });
+      
+      setPendingImport({ data, fileName, sheetName });
+      
+      let guessedYear: YearGroup = 7;
+      const yearMatch = fileName.match(/\b(7|8|9|10|11|12|13)\b/i);
+      if (yearMatch) {
+        const num = parseInt(yearMatch[0]);
+        if (num === 10 || num === 11) guessedYear = `${num} IGCSE` as YearGroup;
+        else if (num === 12 || num === 13) guessedYear = `${num} IB` as YearGroup;
+        else guessedYear = num as YearGroup;
+      }
+      if (fileName.toLowerCase().includes('igcse')) {
+        if (fileName.includes('10')) guessedYear = '10 IGCSE';
+        else if (fileName.includes('11')) guessedYear = '11 IGCSE';
+      } else if (fileName.toLowerCase().includes('ib')) {
+        if (fileName.includes('12')) guessedYear = '12 IB';
+        else if (fileName.includes('13')) guessedYear = '13 IB';
+      }
+      
+      setImportConfig({
+        yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
+        groupName: fileName,
+        assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
+        subject: SUBJECTS_BY_YEAR[(yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter][0],
+        maxMarks: 100,
+        date: new Date().toISOString().split('T')[0]
+      });
+      
+      setImportPreview(null);
+      setImportColumnSubjects({});
+      setShowImportModal(true);
+      e.target.value = '';
+    };
+
+    for (const file of files) {
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
-
-      const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s_]/g, '');
-
-      const processData = (data: any[], sheetName?: string) => {
-        if (data.length === 0) return;
-
-        const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
-        const metadataHeaders = [
-          'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
-          'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname'
-        ].map(h => normalizeKey(h));
-
-        const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
-        
-        // Filter for columns that are likely scores (not metadata and contain numeric data)
-        const extraColumns = headers.filter(h => {
-          if (metadataHeaders.includes(normalizeKey(h))) return false;
-          
-          // Check if at least one row has a numeric value in this column
-          return data.some((row: any) => {
-            const val = row[h];
-            return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
-          });
-        });
-        
-        setPendingImport({ data, fileName, sheetName });
-        
-        // Try to guess year group from filename or data
-        let guessedYear: YearGroup = 7;
-        const yearMatch = fileName.match(/\b(7|8|9|10|11|12|13)\b/i);
-        if (yearMatch) {
-          const num = parseInt(yearMatch[0]);
-          if (num === 10 || num === 11) guessedYear = `${num} IGCSE` as YearGroup;
-          else if (num === 12 || num === 13) guessedYear = `${num} IB` as YearGroup;
-          else guessedYear = num as YearGroup;
-        }
-        if (fileName.toLowerCase().includes('igcse')) {
-          if (fileName.includes('10')) guessedYear = '10 IGCSE';
-          else if (fileName.includes('11')) guessedYear = '11 IGCSE';
-        } else if (fileName.toLowerCase().includes('ib')) {
-          if (fileName.includes('12')) guessedYear = '12 IB';
-          else if (fileName.includes('13')) guessedYear = '13 IB';
-        }
-        
-        setImportConfig({
-          yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
-          groupName: fileName,
-          assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
-          subject: SUBJECTS_BY_YEAR[(yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter][0],
-          maxMarks: 100,
-          date: new Date().toISOString().split('T')[0]
-        });
-        
-        setImportPreview(null);
-        setImportColumnSubjects({});
-        setShowImportModal(true);
-        e.target.value = '';
-      };
-
       if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          const data = evt.target?.result;
-          const wb = XLSX.read(data, { type: 'array' });
-
-          const allData: any[] = [];
-          wb.SheetNames.forEach(wsname => {
-            const ws = wb.Sheets[wsname];
-            const jsonData = XLSX.utils.sheet_to_json(ws, { defval: null });
-            if (jsonData.length > 0) {
-              jsonData.forEach((row: any) => {
-                row.__sheetName = wsname;
-              });
-              allData.push(...jsonData);
-            }
-          });
-
-          processData(allData, wb.SheetNames[0]);
-        };
-        reader.readAsArrayBuffer(file);
-      } else {
-        Papa.parse(file, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => {
-            processData(results.data);
+        const data = await new Promise<ArrayBuffer>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => resolve(evt.target?.result as ArrayBuffer);
+          reader.readAsArrayBuffer(file);
+        });
+        const wb = XLSX.read(data, { type: 'array' });
+        wb.SheetNames.forEach(wsname => {
+          const ws = wb.Sheets[wsname];
+          const jsonData = XLSX.utils.sheet_to_json(ws, { defval: null });
+          if (jsonData.length > 0) {
+            jsonData.forEach((row: any) => {
+              row.__sheetName = wsname;
+            });
+            allData.push(...jsonData);
           }
         });
+      } else {
+        const data = await new Promise<any[]>((resolve) => {
+          Papa.parse(file, {
+            header: false,
+            skipEmptyLines: true,
+            complete: (results) => {
+              const rawData = results.data as any[][];
+              const headerIndex = rawData.findIndex(row => 
+                row.some(cell => {
+                  if (typeof cell !== 'string') return false;
+                  const c = cell.toLowerCase();
+                  return c.includes('surname') || c.includes('forename') || c.includes('student');
+                })
+              );
+              
+              if (headerIndex === -1) {
+                resolve([]);
+                return;
+              }
+
+              const headers = rawData[headerIndex];
+              const dataRows = rawData.slice(headerIndex + 1);
+              
+              const result = dataRows.map(row => {
+                const obj: any = {};
+                headers.forEach((h, i) => {
+                  obj[h] = row[i];
+                });
+                return obj;
+              });
+              resolve(result);
+            }
+          });
+        });
+        allData.push(...data);
       }
     }
+    processData(allData, fileName);
   };
 
   const confirmImport = () => {
@@ -2098,7 +2121,7 @@ export default function App() {
             <label className="btn-secondary flex items-center gap-2 cursor-pointer text-sm">
               <Upload className="w-4 h-4" />
               Upload CSV/Excel
-              <input id="file-upload" type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+              <input id="file-upload" type="file" accept=".csv,.xlsx,.xls" multiple onChange={handleFileUpload} className="hidden" />
             </label>
           </div>
         </div>
@@ -3364,7 +3387,7 @@ export default function App() {
                       <label className="btn-secondary flex items-center justify-center gap-2 cursor-pointer">
                         <Upload className="w-4 h-4" />
                         Upload Completed File
-                        <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+                        <input type="file" accept=".csv,.xlsx,.xls" multiple onChange={handleFileUpload} className="hidden" />
                       </label>
                     </div>
                   </div>
