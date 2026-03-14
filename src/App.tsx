@@ -168,7 +168,6 @@ export default function App() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const isFetching = React.useRef(false);
-  const isImporting = React.useRef(false); // blocks orphan cleanup during import
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['year-7'])); // Default Year 7 expanded
 
@@ -214,30 +213,9 @@ export default function App() {
     if (!showMarksModal) setMarksGroupFilter('all');
   }, [showMarksModal]);
 
-  // Auto-run preview when import modal opens so Import button is immediately available
-  useEffect(() => {
-  if (showImportModal && pendingImport) {
-    const t = setTimeout(() => previewImport(), 50);
-    return () => clearTimeout(t);
-  }
-}, [showImportModal, pendingImport]);
-
   useEffect(() => {
     if (!showPaperGradingModal) setModalGroupFilter('all');
   }, [showPaperGradingModal]);
-
-  // Save immediately on page unload/refresh as safety net
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      // Fire-and-forget saves for any unsaved state
-      students.forEach(s => setDoc(doc(db, 'students', s.id), { ...s, yearGroup: migrateYear(s.yearGroup) }).catch(() => {}));
-      groups.forEach(g => setDoc(doc(db, 'groups', g.id), { ...g, yearGroup: migrateYear(g.yearGroup) }).catch(() => {}));
-      assessments.forEach(a => setDoc(doc(db, 'assessments', a.id), { ...a, yearGroup: migrateYear(a.yearGroup) }).catch(() => {}));
-      marks.forEach(m => setDoc(doc(db, 'marks', m.id), m).catch(() => {}));
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [students, groups, assessments, marks]);
 
   // #8: Escape key closes any open modal
   useEffect(() => {
@@ -267,19 +245,19 @@ export default function App() {
           getYearBoundaries()
         ]);
         console.log("Data fetched:", { students, assessments, marks, groups, fetchedBoundaries });
-        setStudents(Array.isArray(students) ? students : []);
-setAssessments(Array.isArray(assessments) ? assessments : []);
-setMarks(Array.isArray(marks) ? marks : []);
-setGroups(Array.isArray(groups) ? groups : []);
+        setStudents(students || []);
+        setAssessments(assessments || []);
+        setMarks(marks || []);
+        setGroups(groups || []);
         if (fetchedBoundaries) {
           setYearBoundaries(fetchedBoundaries as Record<string, GradeBoundary[]>);
         }
+        isFetching.current = false;
         setHasLoaded(true);
       } catch (error) {
         console.error("Failed to fetch data:", error);
       } finally {
         setIsInitialLoading(false);
-        isFetching.current = false;
       }
     };
     fetchData();
@@ -287,7 +265,8 @@ setGroups(Array.isArray(groups) ? groups : []);
 
   // Save data when state changes
   useEffect(() => {
-   if (!hasLoaded || isFetching.current || isImporting.current) return;
+    if (!hasLoaded || isFetching.current) return;
+
     const saveData = async () => {
       console.log("Saving data to Firebase...");
       try {
@@ -389,28 +368,18 @@ setGroups(Array.isArray(groups) ? groups : []);
   // Cleanup orphaned groups (groups with no students) from Firestore and local state
   // Runs across ALL academic years so old ghost groups get purged regardless of selected year
   useEffect(() => {
-    if (!hasLoaded || groups.length === 0 || isImporting.current) return;
-    // Normalise yearGroup to string before comparing, to avoid race with migrateYear effect
-    // e.g. numeric 10 and string "10 IGCSE" both normalise consistently
-    const normaliseYG = (y: any): string => {
-      const s = String(y).trim();
-      if (s === '10' || s === '10 IGCSE') return '10 IGCSE';
-      if (s === '11' || s === '11 IGCSE') return '11 IGCSE';
-      if (s === '12' || s === '12 IB') return '12 IB';
-      if (s === '13' || s === '13 IB') return '13 IB';
-      return s;
-    };
+    if (!hasLoaded || groups.length === 0) return;
     // Build a key set from ALL students across all years
     const studentGroupKeys = new Set(
-      students.map(s => `${normaliseYG(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
+      students.map(s => `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`)
     );
     const orphanedGroups = groups.filter(g => 
-      !studentGroupKeys.has(`${normaliseYG(g.yearGroup)}|${g.name}|${g.academicYear}`)
+      !studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
     );
     if (orphanedGroups.length > 0) {
       console.log(`Cleaning up ${orphanedGroups.length} orphaned group(s):`, orphanedGroups.map(g => g.name));
       setGroups(prev => prev.filter(g => 
-        studentGroupKeys.has(`${normaliseYG(g.yearGroup)}|${g.name}|${g.academicYear}`)
+        studentGroupKeys.has(`${String(g.yearGroup)}|${g.name}|${g.academicYear}`)
       ));
       // Delete from Firestore permanently
       orphanedGroups.forEach(g => {
@@ -1304,8 +1273,6 @@ setGroups(Array.isArray(groups) ? groups : []);
         // Filter for columns that are likely scores (not metadata and contain numeric data)
         const extraColumns = headers.filter(h => {
           if (metadataHeaders.includes(normalizeKey(h))) return false;
-          // Skip blank/auto-generated XLSX column names (from empty header cells)
-          if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
           
           // Check if at least one row has a numeric value in this column
           return data.some((row: any) => {
@@ -1335,10 +1302,7 @@ setGroups(Array.isArray(groups) ? groups : []);
         
         setImportConfig({
           yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
-          groupName: (() => {
-            const m = fileName.match(/^(\d{1,2}[A-Za-z]{1,4}|\d{1,2})/);
-            return (m && m[1]) ? m[1] : fileName;
-          })(),
+          groupName: fileName,
           assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
           subject: SUBJECTS_BY_YEAR[(yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter][0],
           maxMarks: 100,
@@ -1384,11 +1348,8 @@ setGroups(Array.isArray(groups) ? groups : []);
     }
   };
 
-  const confirmImport = async () => {
-   if (!pendingImport || !pendingImport.data) {
-  console.error("Import failed: no data");
-  return;
-}
+  const confirmImport = () => {
+    if (!pendingImport) return;
 
     const { data, sheetName: defaultSheetName } = pendingImport;
     const { yearGroup, groupName, assessmentName: defaultAssessmentName, subject: defaultSubject, maxMarks: defaultMaxMarks, date: defaultDate } = importConfig;
@@ -1492,10 +1453,6 @@ setGroups(Array.isArray(groups) ? groups : []);
     const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
     const scoreColumns: string[] = headers.filter(h => {
       if (metadataHeaders.includes(normalizeKey(h))) return false;
-      // Skip blank/auto-generated XLSX column names (from empty header cells)
-      if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
-      // Include if header has "(N)" marks pattern (even if all values currently null)
-      if (/\(\d+\)/.test(h)) return true;
       return data.some((row: any) => {
         const val = row[h];
         return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
@@ -1551,8 +1508,11 @@ setGroups(Array.isArray(groups) ? groups : []);
       // 2. The sheet name (set as __sheetName on every row for Excel imports)
       // 3. The importConfig groupName (filename fallback for CSV imports)
       const rowGroupCol = findValue(row, ['group', 'class', 'groupname']);
+      console.log('DEBUG: row keys:', Object.keys(row));
+      console.log('DEBUG: row:', row, 'rowGroupCol:', rowGroupCol);
       const rowGroupName = rowGroupCol ? String(rowGroupCol).trim() : null;
       const effectiveGroupName = rowGroupName || rowSheetName || groupName;
+      console.log('DEBUG: effectiveGroupName:', effectiveGroupName);
 
       // Derive year group from group name if possible (e.g., "10R" -> "10 IGCSE")
       if (effectiveGroupName) {
@@ -1581,24 +1541,8 @@ setGroups(Array.isArray(groups) ? groups : []);
         }
       }
 
-      // Ensure student exists — match by name + yearGroup (normalised) + group + academicYear
-      // Normalise yearGroup for comparison to handle numeric vs string (e.g. 10 vs "10 IGCSE")
-      const normaliseYGStr = (y: any) => {
-        const s = String(y).trim();
-        if (s === '10' || s === '10 IGCSE') return '10 IGCSE';
-        if (s === '11' || s === '11 IGCSE') return '11 IGCSE';
-        if (s === '12' || s === '12 IB') return '12 IB';
-        if (s === '13' || s === '13 IB') return '13 IB';
-        return s;
-      };
-      // Match by name + yearGroup + academicYear only (NOT groupName).
-      // This ensures re-importing always corrects a student's groupName
-      // if it was wrong from a previous import (e.g. "10 IGCSE" -> "10R").
-      let student = newStudents.find(s => 
-        s.name.trim().toLowerCase() === studentName.toLowerCase() && 
-        normaliseYGStr(s.yearGroup) === normaliseYGStr(effectiveYearGroup) && 
-        s.academicYear === selectedAcademicYear
-      );
+      // Ensure student exists
+      let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === effectiveYearGroup && s.academicYear === selectedAcademicYear);
       if (!student) {
         student = { 
           id: Math.random().toString(36).substr(2, 9), 
@@ -1768,35 +1712,10 @@ setGroups(Array.isArray(groups) ? groups : []);
       }
     });
 
-    // Immediately persist to Firebase so data survives a refresh
-    // (don't rely on the debounced save useEffect which has a 1s delay)
-    setSaveStatus('saving');
-    try {
-      await Promise.all([
-        ...newStudents.map((s: any) => setDoc(doc(db, 'students', s.id), {
-          ...s, yearGroup: migrateYear(s.yearGroup)
-        })),
-        ...newAssessments.map((a: any) => setDoc(doc(db, 'assessments', a.id), {
-          ...a, yearGroup: migrateYear(a.yearGroup)
-        })),
-        ...newMarks.map((m: any) => setDoc(doc(db, 'marks', m.id), m)),
-        ...newGroups.map((g: any) => setDoc(doc(db, 'groups', g.id), {
-          ...g, yearGroup: migrateYear(g.yearGroup)
-        })),
-      ]);
-    } catch (saveError) {
-      console.error('Import save failed:', saveError);
-    }
-
-    // Block orphan cleanup while we update all state together
-    // (prevents race where new groups appear orphaned before students are updated)
-    isImporting.current = true;
     setGroups(newGroups);
     setStudents(newStudents);
     setAssessments(newAssessments);
     setMarks(newMarks);
-    // Release the block after React has processed all state updates
-    setTimeout(() => { isImporting.current = false; }, 100);
     
     const newStudentCount = newStudents.length - students.length;
     const newAssessmentCount = newAssessments.length - assessments.length;
@@ -1805,7 +1724,6 @@ setGroups(Array.isArray(groups) ? groups : []);
     setShowImportModal(false);
     setPendingImport(null);
     setImportPreview(null);
-    setImportColumnSubjects({});
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 3000);
 
@@ -1822,11 +1740,8 @@ setGroups(Array.isArray(groups) ? groups : []);
   };
 
   // Dry-run the import to show a preview of what will be created/updated
- const previewImport = () => {
-    console.log("Preview triggered:", pendingImport);
-
-    if (!pendingImport || !importConfig) return;
-    
+  const previewImport = () => {
+    if (!pendingImport) return;
     const { data } = pendingImport;
     const { yearGroup, subject: defaultSubject, maxMarks: defaultMaxMarks } = importConfig;
 
@@ -1843,8 +1758,6 @@ setGroups(Array.isArray(groups) ? groups : []);
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const scoreColumns = headers.filter(h => {
       if (metadataKeys.includes(normalizeKey(h))) return false;
-      // Skip blank/auto-generated XLSX column names (from empty header cells)
-      if (h.startsWith('__EMPTY') || h === '__rowNum__' || !h.trim()) return false;
       // Include column if it has numeric data OR if header contains "(N)" max-marks pattern
       // This catches assessment columns that are all-empty (e.g. not yet marked)
       if (/\(\d+\)/.test(h)) return true;
@@ -1914,22 +1827,10 @@ setGroups(Array.isArray(groups) ? groups : []);
       if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
         colSubjects[col] = allSubjects.find(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())!;
       } else {
-        // Fall back to the subject already selected in the import config
-        colSubjects[col] = defaultSubject || '';
+        colSubjects[col] = ''; // needs user to assign
       }
     });
     setImportColumnSubjects(colSubjects);
-
-    // If no Group column found, try to extract group name from filename
-    // e.g. "10S_CS_2026" -> "10S", "10R_2026" -> "10R"
-    if (detectedGroups.size === 0 && pendingImport?.fileName) {
-      const fnMatch = pendingImport.fileName.match(/^([A-Za-z0-9]+)/);
-      if (fnMatch && fnMatch[1] && fnMatch[1].length <= 6) {
-        detectedGroups.add(fnMatch[1]);
-        // Also update the importConfig groupName to the extracted value
-        setImportConfig(prev => ({ ...prev, groupName: fnMatch[1] }));
-      }
-    }
 
     setImportPreview({
       assessments: assessmentNames,
@@ -2784,18 +2685,6 @@ setGroups(Array.isArray(groups) ? groups : []);
                     <Plus className="w-4 h-4" />
                     Add Student
                   </button>
-                  <label className="btn-secondary w-full flex items-center justify-center gap-2 cursor-pointer">
-                    <Upload className="w-4 h-4" />
-                    Bulk Import
-                    <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleBulkStudentImport} />
-                  </label>
-                  <button
-                    onClick={downloadStudentTemplate}
-                    className="btn-secondary w-full flex items-center justify-center gap-2 text-indigo-600 border-indigo-100 hover:bg-indigo-50"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download Student Template
-                  </button>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input 
@@ -2817,22 +2706,6 @@ setGroups(Array.isArray(groups) ? groups : []);
                   </div>
                 </div>
 
-                {/* Warning banner when groups have year-group-style names (stale import data) */}
-                {groups.filter(g => 
-                  g.academicYear === selectedAcademicYear && 
-                  ['7','8','9','10 IGCSE','11 IGCSE','12 IB','13 IB'].includes(String(g.name))
-                ).length > 0 && (
-                  <div className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2">
-                    <span className="text-amber-500 text-lg leading-none mt-0.5">⚠️</span>
-                    <div className="flex-1">
-                      <p className="text-xs font-bold text-amber-800">Groups not separated correctly</p>
-                      <p className="text-[10px] text-amber-700 mt-0.5">
-                        Some students are grouped under a year label (e.g. "10 IGCSE") instead of their class (e.g. "10R", "10S"). 
-                        Please re-import your Excel files using <strong>Import Data</strong> to fix this — the app will automatically correct the group names.
-                      </p>
-                    </div>
-                  </div>
-                )}
                 <div className="card max-h-[calc(100vh-250px)] overflow-y-auto divide-y divide-slate-100">
                   {filteredPerformances.length === 0 ? (
                     <div className="p-8 text-center">
@@ -2914,10 +2787,10 @@ setGroups(Array.isArray(groups) ? groups : []);
                                     </div>
                                   </div>
                                   {isGroupExpanded && groupStudents.map((p) => (
-                                    <div
+                                    <button
                                       key={p.student.id}
                                       onClick={() => setSelectedStudentId(p.student.id)}
-                                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between group cursor-pointer ${
+                                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
                                         selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
                                       }`}
                                     >
@@ -2943,19 +2816,17 @@ setGroups(Array.isArray(groups) ? groups : []);
                                           {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
                                         </span>
                                         {getTrendIcon(p.trend)}
-                                        <div
+                                        <button 
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleDeleteStudent(p.student.id);
                                           }}
-                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity cursor-pointer"
-                                          role="button"
-                                          title="Delete student"
+                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
                                         >
                                           <Trash2 className="w-3 h-3" />
-                                        </div>
+                                        </button>
                                       </div>
-                                    </div>
+                                    </button>
                                   ))}
                                 </div>
                               );
@@ -4245,12 +4116,13 @@ setGroups(Array.isArray(groups) ? groups : []);
           </div>
         )}
         {showImportModal && (
-         <div 
-  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-  onClick={(e) => e.stopPropagation()}
->
-            <div className="card w-full max-w-md flex flex-col max-h-[90vh]">
-              <div className="p-6 overflow-y-auto flex-1">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="card w-full max-w-md p-6"
+            >
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600">
                   <Upload className="w-6 h-6" />
@@ -4434,8 +4306,7 @@ setGroups(Array.isArray(groups) ? groups : []);
                 </div>
               )}
 
-              </div>{/* end scrollable content */}
-              <div className="flex gap-3 p-6 pt-4 border-t border-slate-100">
+              <div className="flex gap-3 mt-6">
                 <button 
                   onClick={() => { setShowImportModal(false); setPendingImport(null); setImportPreview(null); }}
                   className="btn-secondary flex-1"
@@ -4443,26 +4314,24 @@ setGroups(Array.isArray(groups) ? groups : []);
                   Cancel
                 </button>
                 <button 
-                  onClick={() => { console.log('Preview clicked'); previewImport(); }}
+                  onClick={previewImport}
                   className="btn-secondary flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
                 >
                   Preview
                 </button>
                 <button 
-  onClick={() => { 
-    console.log('Import clicked'); 
-    confirmImport().catch(e => { 
-      console.error('Import failed:', e); 
-      alert('Import error: ' + e.message); 
-    }); 
-  }}
-  className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
-  disabled={!importPreview}
->
+                  onClick={() => { confirmImport(); setImportPreview(null); setImportColumnSubjects({}); }}
+                  className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={
+                    !importPreview ||
+                    Object.keys(importColumnSubjects).length === 0 ||
+                    Object.values(importColumnSubjects).some(s => !s)
+                  }
+                >
                   Import
                 </button>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>
