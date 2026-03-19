@@ -38,9 +38,12 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI, Type } from "@google/genai";
 import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries, deleteStudent as fbDeleteStudent, deleteAssessment as fbDeleteAssessment, deleteMark as fbDeleteMark, deleteGroup as fbDeleteGroup } from './services/firebaseService';
 import { setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 import { 
   Student, 
   Assessment, 
@@ -741,8 +744,84 @@ export default function App() {
   };
 
   const handlePaperUpload = async (e: React.ChangeEvent<HTMLInputElement>, assessmentId: string) => {
-    // Paper upload functionality removed
-    console.log("Paper upload functionality disabled.");
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsExtracting(true);
+    setExtractionError(null);
+
+    try {
+      // Convert file to base64
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const prompt = extractionMode === 'subparts' 
+        ? "Extract all question numbers (including sub-parts like 1a, 1b, etc.) and their maximum marks from this exam paper. Return the data as a JSON array of objects with 'number' (string) and 'maxMarks' (number) properties. Ensure the total of maxMarks matches the overall paper total if specified."
+        : "Extract only the main question numbers (1, 2, 3, etc.) and their total maximum marks for each question from this exam paper. Return the data as a JSON array of objects with 'number' (string) and 'maxMarks' (number) properties. Ensure the total of maxMarks matches the overall paper total if specified.";
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: file.type,
+                  data: base64Data,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                number: { type: Type.STRING },
+                maxMarks: { type: Type.NUMBER },
+              },
+              required: ["number", "maxMarks"],
+            },
+          },
+        },
+      });
+
+      const extractedQuestions: Question[] = JSON.parse(response.text || '[]');
+      
+      if (extractedQuestions.length === 0) {
+        throw new Error("No questions could be extracted from the paper. Please ensure the file is clear and contains question numbers and marks.");
+      }
+
+      const totalMaxMarks = extractedQuestions.reduce((sum, q) => sum + q.maxMarks, 0);
+
+      // Update assessment in Firestore
+      await updateDoc(doc(db, 'assessments', assessmentId), {
+        questions: extractedQuestions,
+        maxMarks: totalMaxMarks
+      });
+
+      // Update local state
+      setAssessments(prev => prev.map(a => 
+        a.id === assessmentId ? { ...a, questions: extractedQuestions, maxMarks: totalMaxMarks } : a
+      ));
+
+      setIsExtracting(false);
+    } catch (error: any) {
+      console.error("Extraction error:", error);
+      setExtractionError(error.message || "Failed to extract questions. Please try again with a clearer file.");
+      setIsExtracting(false);
+    }
   };
 
   const handleDeleteStudent = async (studentId: string) => {
