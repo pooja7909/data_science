@@ -819,15 +819,17 @@ export default function App() {
 
     const currentStudents = students.filter(s => s.academicYear === selectedAcademicYear);
     const currentGroups = groups.filter(g => g.academicYear === selectedAcademicYear);
+    const currentAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
 
-    if (currentStudents.length === 0 && currentGroups.length === 0) {
-      alert(`No students or groups found for ${selectedAcademicYear} to promote.`);
+    if (currentStudents.length === 0 && currentGroups.length === 0 && currentAssessments.length === 0) {
+      alert(`No students, groups, or assessments found for ${selectedAcademicYear} to promote.`);
       setSaveStatus('idle');
       return;
     }
 
     const newStudentsList: Student[] = [...students];
     const newGroupsList: Group[] = [...groups];
+    const newAssessmentsList: Assessment[] = [...assessments];
 
     // Promote Groups
     currentGroups.forEach(group => {
@@ -862,8 +864,37 @@ export default function App() {
       }
     });
 
+    // Promote Assessments (Clone templates to the next year for the same year groups)
+    currentAssessments.forEach(assessment => {
+      const exists = assessments.find(a => 
+        a.name === assessment.name && 
+        a.yearGroup === assessment.yearGroup && 
+        a.academicYear === nextYear &&
+        a.subject === assessment.subject
+      );
+      if (!exists) {
+        // Increment date by 1 year
+        let nextDate = assessment.date;
+        try {
+          const d = new Date(assessment.date);
+          d.setFullYear(d.getFullYear() + 1);
+          nextDate = d.toISOString().split('T')[0];
+        } catch (e) {
+          // Fallback to original date if parsing fails
+        }
+
+        newAssessmentsList.push({
+          ...assessment,
+          id: Math.random().toString(36).substr(2, 9),
+          academicYear: nextYear,
+          date: nextDate
+        });
+      }
+    });
+
     setStudents(newStudentsList);
     setGroups(newGroupsList);
+    setAssessments(newAssessmentsList);
     
     // Update filters to follow the cohort
     const nextYG = getNextYearGroup(yearFilter as YearGroup);
@@ -871,7 +902,7 @@ export default function App() {
     
     setSelectedAcademicYear(nextYear);
     setSaveStatus('saved');
-    alert(`Successfully promoted ${currentStudents.length} students and ${currentGroups.length} groups to ${nextYear}.`);
+    alert(`Successfully promoted ${currentStudents.length} students, ${currentGroups.length} groups, and ${currentAssessments.length} assessment templates to ${nextYear}.`);
     setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
