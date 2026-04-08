@@ -56,22 +56,17 @@ import {
 } from './types';
 
 const SUBJECTS_BY_YEAR: Record<YearGroup, string[]> = {
-  7: ['Science', 'Computer Science'],
-  8: ['Science', 'Computer Science'],
-  9: ['Science', 'Computer Science'],
-  '10 IGCSE': ['Physics', 'Chemistry', 'Biology', 'Computer Science'],
-  '11 IGCSE': ['Physics', 'Chemistry', 'Biology', 'Computer Science'],
-  '12 IB': ['Physics', 'Chemistry', 'Biology', 'ESS', 'Computer Science'],
-  '13 IB': ['Physics', 'Chemistry', 'Biology', 'ESS', 'Computer Science'],
+  7: ['Computer Science'],
+  8: ['Computer Science'],
+  9: ['Computer Science'],
+  '10 IGCSE': ['Computer Science'],
+  '11 IGCSE': ['Computer Science'],
+  '12 IB': ['Computer Science'],
+  '13 IB': ['Computer Science'],
 };
 
 const SUBJECT_COLORS: Record<string, string> = {
-  'Science': '#6366f1', // Indigo
-  'Physics': '#3b82f6', // Blue
-  'Chemistry': '#10b981', // Emerald
-  'Biology': '#f59e0b', // Amber
   'Computer Science': '#8b5cf6', // Violet
-  'ESS': '#ec4899', // Pink
 };
 
 const KS3_BOUNDARIES: GradeBoundary[] = [
@@ -153,12 +148,12 @@ export default function App() {
     yearGroup: 7 as YearGroup, 
     groupName: '', 
     assessmentName: '', 
-    subject: 'Science', 
+    subject: 'Computer Science', 
     maxMarks: 100, 
     date: new Date().toISOString().split('T')[0] 
   });
   const [marksGroupFilter, setMarksGroupFilter] = useState<string>('all');
-  const [newAssessment, setNewAssessment] = useState({ name: '', subject: 'Science', maxMarks: 100, date: new Date().toISOString().split('T')[0], yearGroup: 7 as YearGroup });
+  const [newAssessment, setNewAssessment] = useState({ name: '', subject: 'Computer Science', maxMarks: 100, date: new Date().toISOString().split('T')[0], yearGroup: 7 as YearGroup });
   const [newStudent, setNewStudent] = useState({ name: '', yearGroup: 7 as YearGroup, groupName: '' });
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
@@ -455,7 +450,7 @@ export default function App() {
       const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
       // Subject filter logic:
       // 1. If student has a subjects[] field (from import), use it directly
-      // 2. For Years 7-9, all students take all subjects for their year (Science + CS)
+      // 2. For Years 7-9, all students take all subjects for their year (Computer Science)
       // 3. For Years 10-13, check marks if no subjects field set
       const studentSubjects: string[] = (p.student as any).subjects?.length
         ? (p.student as any).subjects
@@ -1190,11 +1185,11 @@ export default function App() {
     // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
     const igcseData = [
       ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects'],
-      ['Ahmed',   'Sarah',    '10 IGCSE',   '10A',   'Physics, Chemistry, Biology'],
-      ['Brown',   'James',    '10 IGCSE',   '10A',   'Physics, Computer Science'],
-      ['Clarke',  'Emma',     '10 IGCSE',   '10B',   'Chemistry, Biology, Computer Science'],
-      ['Patel',   'Priya',    '11 IGCSE',   '11A',   'Physics, Chemistry, Biology'],
-      ['Wilson',  'Tom',      '11 IGCSE',   '11A',   'Biology, Computer Science'],
+      ['Ahmed',   'Sarah',    '10 IGCSE',   '10A',   'Computer Science'],
+      ['Brown',   'James',    '10 IGCSE',   '10A',   'Computer Science'],
+      ['Clarke',  'Emma',     '10 IGCSE',   '10B',   'Computer Science'],
+      ['Patel',   'Priya',    '11 IGCSE',   '11A',   'Computer Science'],
+      ['Wilson',  'Tom',      '11 IGCSE',   '11A',   'Computer Science'],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
     ws2['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }];
@@ -1203,11 +1198,11 @@ export default function App() {
     // ── Sheet 3: Years 12-13 IB ──────────────────────────────────────────────
     const ibData = [
       ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels (HL or SL per subject, same order)'],
-      ['Ahmed',   'Sarah',    '12 IB',      '12A',   'Physics, Chemistry, ESS',            'HL, SL, SL'],
-      ['Brown',   'James',    '12 IB',      '12A',   'Biology, Computer Science',          'HL, SL'],
-      ['Clarke',  'Emma',     '12 IB',      '12B',   'Physics, Chemistry, Biology',        'HL, HL, SL'],
-      ['Patel',   'Priya',    '13 IB',      '13A',   'Physics, ESS, Computer Science',     'SL, SL, HL'],
-      ['Wilson',  'Tom',      '13 IB',      '13A',   'Biology, Chemistry',                 'HL, SL'],
+      ['Ahmed',   'Sarah',    '12 IB',      '12A',   'Computer Science',            'HL'],
+      ['Brown',   'James',    '12 IB',      '12A',   'Computer Science',          'HL'],
+      ['Clarke',  'Emma',     '12 IB',      '12B',   'Computer Science',        'SL'],
+      ['Patel',   'Priya',    '13 IB',      '13A',   'Computer Science',     'HL'],
+      ['Wilson',  'Tom',      '13 IB',      '13A',   'Computer Science',                 'HL'],
     ];
     const ws3 = XLSX.utils.aoa_to_sheet(ibData);
     ws3['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 45 }];
@@ -1224,13 +1219,11 @@ export default function App() {
       ['Forename',     'Student first name'],
       ['Year Group',   'Must be exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
       ['Group',        'Class code e.g. 7W, 10A, 12B — must match exactly across sheets'],
-      ['Subjects',     'IGCSE & IB only. Comma-separated from: Physics, Chemistry, Biology, Computer Science, ESS'],
+      ['Subjects',     'IGCSE & IB only. Comma-separated from: Computer Science'],
       ['Levels',       'IB only. One HL or SL per subject in the same order as the Subjects column'],
       [''],
       ['SUBJECTS BY YEAR'],
-      ['Years 7-9',    'Science, Computer Science (assigned automatically — no column needed)'],
-      ['Years 10-11',  'Physics, Chemistry, Biology, Computer Science'],
-      ['Years 12-13',  'Physics, Chemistry, Biology, Computer Science, ESS'],
+      ['Years 7-13',    'Computer Science'],
       [''],
       ['TIPS'],
       ['• Delete the example rows before uploading — keep only the header row and your students.'],
@@ -1249,16 +1242,13 @@ export default function App() {
   const downloadTemplate = () => {
     const wb = XLSX.utils.book_new();
 
-    // ── Sheet 1: Years 7-9 (Science + Computer Science) ─────────────────────
+    // ── Sheet 1: Years 7-9 (Computer Science) ─────────────────────
     // One row per student per subject. Assessment columns = "Assessment Name (max marks)"
     const ks3Headers = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Test 1 (50)', 'Test 2 (30)', 'End of Term (100)'];
     const ks3Data = [
       ks3Headers,
-      ['Ahmed',  'Sarah', '7', '7W', 'Science',          42, 25, 78],
       ['Ahmed',  'Sarah', '7', '7W', 'Computer Science', 38, 22, 65],
-      ['Brown',  'James', '7', '7W', 'Science',          45, 28, 82],
       ['Brown',  'James', '7', '7W', 'Computer Science', 40, 20, 70],
-      ['Clarke', 'Emma',  '8', '8A', 'Science',          48, 27, 85],
       ['Clarke', 'Emma',  '8', '8A', 'Computer Science', 44, 26, 75],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
@@ -1268,12 +1258,12 @@ export default function App() {
     // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
     // Option A: one row per student, subject encoded in column headers
     // Assessment columns use "Assessment Name - Subject (maxMarks)" format
-    const igcseHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Paper 1 - Physics (80)', 'Paper 1 - Chemistry (80)', 'Paper 1 - Biology (80)', 'Programming - Computer Science (35)', 'Mock - Physics (100)'];
+    const igcseHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Programming - Computer Science (35)', 'Mock - Computer Science (100)'];
     const igcseData = [
       igcseHeaders,
-      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Physics,Chemistry,Biology',    65, 70, 60, '',  72],
-      ['Brown',  'James', '10 IGCSE', '10A', 'Physics,Computer Science',     55, '', '', 65,  60],
-      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Physics,Chemistry',            70, 68, '', '',  75],
+      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Computer Science',    32, 72],
+      ['Brown',  'James', '10 IGCSE', '10A', 'Computer Science',    28, 60],
+      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Computer Science',    30, 75],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
     ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 24 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 20 }];
@@ -1281,12 +1271,12 @@ export default function App() {
 
     // ── Sheet 3: Years 12-13 IB (with Level column) ──────────────────────────
     // Subject encoded in column headers — one row per student
-    const ibHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels', 'Test 1 - Physics (45)', 'Test 1 - Chemistry (45)', 'IA - Biology (24)', 'Mock - Physics (100)', 'Mock - Chemistry (100)'];
+    const ibHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels', 'Test 1 - Computer Science (45)', 'Mock - Computer Science (100)'];
     const ibData = [
       ibHeaders,
-      ['Ahmed',  'Sarah', '12 IB', '12A', 'Physics,Chemistry,ESS',      'HL,SL,SL', 38, 30, '',  75, 62],
-      ['Brown',  'James', '12 IB', '12A', 'Biology,Computer Science',   'HL,SL',    '', '', 22,  '',  ''],
-      ['Clarke', 'Emma',  '13 IB', '13A', 'Physics,Chemistry',          'HL,SL',    42, 32, '',  82, 65],
+      ['Ahmed',  'Sarah', '12 IB', '12A', 'Computer Science',      'HL', 38, 75],
+      ['Brown',  'James', '12 IB', '12A', 'Computer Science',   'SL',    22,  ''],
+      ['Clarke', 'Emma',  '13 IB', '13A', 'Computer Science',          'HL',    42, 82],
     ];
     const ws3 = XLSX.utils.aoa_to_sheet(ibData);
     ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 28 }, { wch: 12 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 20 }, { wch: 22 }];
@@ -1309,7 +1299,7 @@ export default function App() {
       ['Forename',     'Student first name — must match exactly the name already in the app'],
       ['Year Group',   'Exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
       ['Group',        'Class code e.g. 7W, 10A — must match what is in the app'],
-      ['Subject',      'One subject per row: Science, Computer Science, Physics, Chemistry, Biology, or ESS'],
+      ['Subject',      'Must be: Computer Science'],
       ['Level',        'IB only: HL or SL for each row'],
       ['Assessment columns', 'Format: "Assessment Name - Subject (max marks)" e.g. "Paper 1 - Physics (80)" or just "Test 1 (50)" if one subject per row'],
       [''],
@@ -1492,7 +1482,7 @@ export default function App() {
 
     // Normalise a subject string to match SUBJECTS_BY_YEAR keys (case-insensitive)
     const normalizeSubjectName = (raw: string): string => {
-      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+      const allSubjects = ['Computer Science'];
       const match = allSubjects.find(s => s.toLowerCase() === raw.trim().toLowerCase());
       return match || raw.trim();
     };
@@ -1515,7 +1505,7 @@ export default function App() {
       const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
       if (dashMatch) {
         const possibleSubject = dashMatch[2].trim();
-        const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+        const allSubjects = ['Computer Science'];
         const isKnownSubject = allSubjects.some(s => s.toLowerCase() === possibleSubject.toLowerCase());
         if (isKnownSubject) {
           name = dashMatch[1].trim();
@@ -1875,7 +1865,7 @@ export default function App() {
       let name = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
       // Strip subject suffix if present
       const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+      const allSubjects = ['Computer Science'];
       if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
         name = dashMatch[1].trim();
       }
@@ -1925,7 +1915,7 @@ export default function App() {
       const marksMatch = col.match(/\((\d+)\)/);
       let name = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
       const dashMatch = name.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      const allSubjects = ['Physics', 'Chemistry', 'Biology', 'Computer Science', 'Science', 'ESS'];
+      const allSubjects = ['Computer Science'];
       if (dashMatch && allSubjects.some(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())) {
         colSubjects[col] = allSubjects.find(s => s.toLowerCase() === dashMatch[2].trim().toLowerCase())!;
       } else {
@@ -2075,7 +2065,7 @@ export default function App() {
               <BarChart3 className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 leading-tight">Computer Science Data Tracker</h1>
+              <h1 className="text-xl font-bold text-slate-900 leading-tight">CS Data Tracker</h1>
               <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Computer Science Department</p>
             </div>
           </div>
