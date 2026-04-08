@@ -375,7 +375,7 @@ export default function App() {
 
   // Helper for year group matching
   const matchesYearFilter = (itemYear: YearGroup, filter: YearGroup | 'all' | 'IGCSE_ALL' | 'IB_ALL') => {
-    if (filter === 'all') return true;
+    if (filter === 'all') return itemYear !== 'Graduated';
     
     const itemYearStr = String(itemYear);
     const filterStr = String(filter);
@@ -857,7 +857,7 @@ export default function App() {
             id: Math.random().toString(36).substr(2, 9),
             name: student.name,
             yearGroup: nextYearGroup,
-            groupName: student.groupName,
+            groupName: nextYearGroup === 'Graduated' ? `Class of ${selectedAcademicYear.split('-')[0]}` : student.groupName,
             academicYear: nextYear
           });
         }
@@ -2306,7 +2306,7 @@ export default function App() {
                 <option value="IGCSE_ALL">IGCSE (All)</option>
                 <option value="IB_ALL">IB (All)</option>
                 {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
-                  <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                  <option key={y} value={y}>{y === 'Graduated' ? 'Alumni / Graduated' : (typeof y === 'number' ? `Year ${y}` : y)}</option>
                 ))}
               </select>
             </div>
@@ -3037,7 +3037,7 @@ export default function App() {
                             >
                               <div className="flex items-center gap-2">
                                 {isYearExpanded ? <ChevronDown className="w-3 h-3 text-slate-400" /> : <ChevronRight className="w-3 h-3 text-slate-400" />}
-                                <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{typeof year === 'number' ? `Year ${year}` : year}</h4>
+                                <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{year === 'Graduated' ? 'Alumni / Graduated' : (typeof year === 'number' ? `Year ${year}` : year)}</h4>
                               </div>
                               <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                 <select 
