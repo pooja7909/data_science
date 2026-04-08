@@ -245,7 +245,16 @@ export default function App() {
         console.log("Data fetched:", { students, assessments, marks, groups, fetchedBoundaries });
         setStudents(students || []);
         setAssessments(assessments || []);
-        setMarks(marks || []);
+        const uniqueMarks: Mark[] = [];
+        const markKeys = new Set<string>();
+        (marks || []).forEach(m => {
+          const key = `${m.studentId}_${m.assessmentId}`;
+          if (!markKeys.has(key)) {
+            markKeys.add(key);
+            uniqueMarks.push(m);
+          }
+        });
+        setMarks(uniqueMarks);
         setGroups(groups || []);
         if (fetchedBoundaries) {
           setYearBoundaries(fetchedBoundaries as Record<string, GradeBoundary[]>);
@@ -3161,17 +3170,38 @@ export default function App() {
                     </div>
                     
                     {(() => {
-                      const allAssessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
+                      const currentYearStudents = students.filter(s => 
+                        String(s.yearGroup) === String(assessment.yearGroup) && 
+                        s.academicYear === assessment.academicYear
+                      );
+                      const totalStudents = currentYearStudents.length;
+                      const studentIdsInYear = new Set(currentYearStudents.map(s => s.id));
+
+                      const allAssessmentMarks = marks.filter(m => 
+                        m.assessmentId === assessment.id && 
+                        studentIdsInYear.has(m.studentId)
+                      );
                       const absentMarks = allAssessmentMarks.filter(m => (m as any).absent);
-                      // Only count students who actually sat the exam (not absent) for avg and marked count
+                      
+                      // Only count unique students who actually sat the exam (not absent) for avg and marked count
                       const assessmentMarks = allAssessmentMarks.filter(m => !(m as any).absent);
-                      const totalStudents = students.filter(s => String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === assessment.academicYear).length;
-                      const markedCount = assessmentMarks.length;
+                      
+                      // Use a Map to deduplicate marks by studentId
+                      const uniqueMarksMap = new Map<string, Mark>();
+                      assessmentMarks.forEach(m => {
+                        if (!uniqueMarksMap.has(m.studentId)) {
+                          uniqueMarksMap.set(m.studentId, m);
+                        }
+                      });
+                      
+                      const markedCount = uniqueMarksMap.size;
                       const avg = markedCount > 0
-                        ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / markedCount
+                        ? Array.from(uniqueMarksMap.values()).reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / markedCount
                         : null;
-                      // unmarked = students with no mark record at all (not absent, not entered)
-                      const unmarkedCount = totalStudents - allAssessmentMarks.length;
+                      
+                      // unmarked = students in this year group with no mark record at all
+                      const uniqueAllMarksStudents = new Set(allAssessmentMarks.map(m => m.studentId));
+                      const unmarkedCount = Math.max(0, totalStudents - uniqueAllMarksStudents.size);
                       return (
                         <div className="mt-4 pt-4 border-t border-slate-50 space-y-3">
                           <div className="grid grid-cols-3 gap-2 text-center">
