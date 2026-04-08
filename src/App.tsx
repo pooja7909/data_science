@@ -2485,6 +2485,36 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Calculation Notes */}
+              <div className="card p-4 bg-indigo-50/50 border-indigo-100/50">
+                <div className="flex gap-3">
+                  <AlertCircle className="w-5 h-5 text-indigo-500 shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-bold text-indigo-900 mb-1">Data Calculation Notes</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-2">
+                      <div>
+                        <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1">Absent Students</p>
+                        <p className="text-xs text-indigo-800 leading-relaxed">
+                          Assessments marked as <strong>Absent</strong> are excluded from the average calculation. They do not count as 0%; they are simply ignored to ensure the average reflects actual performance.
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1">New Students</p>
+                        <p className="text-xs text-indigo-800 leading-relaxed">
+                          Students with no recorded marks (or only absent marks) will display as <strong>"No data"</strong>. Their statistics will begin appearing as soon as their first assessment score is entered.
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1">Average Logic</p>
+                        <p className="text-xs text-indigo-800 leading-relaxed">
+                          All averages are calculated as the mean of percentages across all assessments the student has sat. This provides a fair comparison regardless of the maximum marks of each test.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {filteredPerformances.length === 0 ? (
                   <div className="lg:col-span-3 card p-12 flex flex-col items-center justify-center text-center bg-slate-50/50 border-dashed border-2">
@@ -3126,7 +3156,14 @@ export default function App() {
                               <p className="text-slate-500">
                                 {formatYearGroup(p.student.yearGroup)} • {p.student.groupName} • {' '}
                                 {(p as any).hasData 
-                                  ? <>Overall Average: <span className="font-bold text-slate-700">{p.averagePercentage.toFixed(1)}%</span></>
+                                  ? (
+                                    <>
+                                      Overall Average: <span className="font-bold text-slate-700">{p.averagePercentage.toFixed(1)}%</span>
+                                      <span className="ml-2 text-[10px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded" title="Averages exclude any assessments marked as Absent">
+                                        Excl. Absences
+                                      </span>
+                                    </>
+                                  )
                                   : <span className="text-slate-400 italic">No assessments sat yet</span>
                                 }
                                 {(p as any).absentCount > 0 && (
@@ -4198,8 +4235,12 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="pt-6 border-t border-slate-100 mt-4">
-                <button onClick={() => setShowMarksModal(null)} className="btn-primary w-full">Save and Close</button>
+              <div className="pt-6 border-t border-slate-100 mt-4 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>Note: Students marked as <strong>ABS</strong> (Absent) are excluded from all average calculations.</span>
+                </div>
+                <button onClick={() => setShowMarksModal(null)} className="btn-primary px-8">Save and Close</button>
               </div>
             </motion.div>
           </div>
@@ -4661,7 +4702,7 @@ export default function App() {
       </AnimatePresence>
       <footer className="bg-white border-t border-slate-200 py-6 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-sm text-slate-500">© {new Date().getFullYear()} Pooja Arora. All rights reserved.</p>
+          <p className="text-sm text-slate-500">© Pooja Arora - Computing Teacher</p>
         </div>
       </footer>
     </div>
