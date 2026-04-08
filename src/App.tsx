@@ -115,6 +115,27 @@ const ACADEMIC_YEARS = Array.from({ length: 2035 - 2023 + 1 }, (_, i) => {
 });
 const CURRENT_ACADEMIC_YEAR = '2025-26';
 
+const getNextAcademicYear = (current: string): string | null => {
+  const idx = ACADEMIC_YEARS.indexOf(current);
+  return idx < ACADEMIC_YEARS.length - 1 ? ACADEMIC_YEARS[idx + 1] : null;
+};
+
+const getPreviousAcademicYear = (current: string): string | null => {
+  const idx = ACADEMIC_YEARS.indexOf(current);
+  return idx > 0 ? ACADEMIC_YEARS[idx - 1] : null;
+};
+
+const getNextYearGroup = (current: YearGroup): YearGroup | 'Graduated' | null => {
+  if (current === 7) return 8;
+  if (current === 8) return 9;
+  if (current === 9) return '10 IGCSE';
+  if (current === '10 IGCSE') return '11 IGCSE';
+  if (current === '11 IGCSE') return '12 IB';
+  if (current === '12 IB') return '13 IB';
+  if (current === '13 IB') return 'Graduated';
+  return null;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'performance' | 'students' | 'assessments' | 'settings'>('dashboard');
   const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(CURRENT_ACADEMIC_YEAR);
@@ -401,14 +422,37 @@ export default function App() {
     const currentYearAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
 
     return currentYearStudents.map(student => {
-      const studentMarks = marks
-        .filter(m => m.studentId === student.id)
-        .map(m => ({
-          ...m,
-          assessment: currentYearAssessments.find(a => a.id === m.assessmentId)!
-        }))
-        .filter(m => m.assessment)
-        .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
+      // Find previous year record for this student if in 11 IGCSE or 13 IB
+      // This fulfills the requirement: "year 10 moves to year 11, year 12 to year 13 along with all their data"
+      let priorMarks: (Mark & { assessment: Assessment })[] = [];
+      if (student.yearGroup === '11 IGCSE' || student.yearGroup === '13 IB') {
+        const prevYear = getPreviousAcademicYear(selectedAcademicYear);
+        const prevYearGroup = student.yearGroup === '11 IGCSE' ? '10 IGCSE' : '12 IB';
+        if (prevYear) {
+          const prevStudent = students.find(s => s.name === student.name && s.yearGroup === prevYearGroup && s.academicYear === prevYear);
+          if (prevStudent) {
+            const prevAssessments = assessments.filter(a => a.academicYear === prevYear && a.yearGroup === prevYearGroup);
+            priorMarks = marks
+              .filter(m => m.studentId === prevStudent.id)
+              .map(m => ({
+                ...m,
+                assessment: prevAssessments.find(a => a.id === m.id || a.id === m.assessmentId)!
+              }))
+              .filter(m => m.assessment);
+          }
+        }
+      }
+
+      const studentMarks = [
+        ...priorMarks,
+        ...marks
+          .filter(m => m.studentId === student.id)
+          .map(m => ({
+            ...m,
+            assessment: currentYearAssessments.find(a => a.id === m.assessmentId)!
+          }))
+          .filter(m => m.assessment)
+      ].sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
       // Only include marks where the student actually sat the assessment (not absent)
       const sittingMarks = studentMarks.filter(m => !(m as any).absent);
@@ -745,6 +789,65 @@ export default function App() {
       };
       reader.readAsText(file);
     }
+  };
+
+  const handleYearTransition = async () => {
+    const nextYear = getNextAcademicYear(selectedAcademicYear);
+    if (!nextYear) {
+      alert("Cannot transition beyond the last supported academic year.");
+      return;
+    }
+
+    if (!window.confirm(`This will promote all students from ${selectedAcademicYear} to ${nextYear}. Students in Year 13 will be marked as Graduated. Continue?`)) {
+      return;
+    }
+
+    setSaveStatus('saving');
+
+    const currentStudents = students.filter(s => s.academicYear === selectedAcademicYear);
+    const currentGroups = groups.filter(g => g.academicYear === selectedAcademicYear);
+
+    const newStudentsList: Student[] = [...students];
+    const newGroupsList: Group[] = [...groups];
+
+    // Promote Groups
+    currentGroups.forEach(group => {
+      const nextYearGroup = getNextYearGroup(group.yearGroup);
+      if (nextYearGroup && nextYearGroup !== 'Graduated') {
+        const exists = groups.find(g => g.name === group.name && g.yearGroup === nextYearGroup && g.academicYear === nextYear);
+        if (!exists) {
+          newGroupsList.push({
+            id: Math.random().toString(36).substr(2, 9),
+            name: group.name,
+            yearGroup: nextYearGroup,
+            academicYear: nextYear
+          });
+        }
+      }
+    });
+
+    // Promote Students
+    currentStudents.forEach(student => {
+      const nextYearGroup = getNextYearGroup(student.yearGroup);
+      if (nextYearGroup && nextYearGroup !== 'Graduated') {
+        const exists = students.find(s => s.name === student.name && s.yearGroup === nextYearGroup && s.academicYear === nextYear);
+        if (!exists) {
+          newStudentsList.push({
+            id: Math.random().toString(36).substr(2, 9),
+            name: student.name,
+            yearGroup: nextYearGroup,
+            groupName: student.groupName,
+            academicYear: nextYear
+          });
+        }
+      }
+    });
+
+    setStudents(newStudentsList);
+    setGroups(newGroupsList);
+    setSelectedAcademicYear(nextYear);
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
   const handlePaperUpload = async (e: React.ChangeEvent<HTMLInputElement>, assessmentId: string) => {
@@ -3415,6 +3518,33 @@ export default function App() {
                 >
                   {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved!' : 'Save Changes'}
                 </button>
+              </div>
+
+              <div className="pt-8 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900 mb-2">Academic Year Transition</h2>
+                    <p className="text-slate-500">Promote all students and groups to the next academic year. This will create new records for the next year without deleting any existing data.</p>
+                  </div>
+                </div>
+                <div className="card p-6 bg-indigo-50 border-indigo-100">
+                  <div className="flex items-center justify-between gap-6">
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-indigo-900 mb-1">Current Year: {selectedAcademicYear}</p>
+                      <p className="text-xs text-indigo-700">
+                        Promoting will move students to their next year group (e.g. Year 10 → Year 11). 
+                        For IGCSE and IB students, their prior year data will follow them to the new year view.
+                      </p>
+                    </div>
+                    <button 
+                      onClick={handleYearTransition}
+                      className="btn-primary whitespace-nowrap flex items-center gap-2"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      Promote to {getNextAcademicYear(selectedAcademicYear) || 'Next Year'}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="pt-8 border-t border-slate-100">
