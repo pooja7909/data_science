@@ -137,6 +137,17 @@ const getNextYearGroup = (current: YearGroup): YearGroup | 'Graduated' | null =>
   return null;
 };
 
+const getPreviousYearGroup = (current: YearGroup | 'Graduated'): YearGroup | null => {
+  if (current === 8) return 7;
+  if (current === 9) return 8;
+  if (current === '10 IGCSE') return 9;
+  if (current === '11 IGCSE') return '10 IGCSE';
+  if (current === '12 IB') return '11 IGCSE';
+  if (current === '13 IB') return '12 IB';
+  if (current === 'Graduated') return '13 IB';
+  return null;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'performance' | 'students' | 'assessments' | 'settings'>('dashboard');
   const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(CURRENT_ACADEMIC_YEAR);
@@ -809,6 +820,12 @@ export default function App() {
     const currentStudents = students.filter(s => s.academicYear === selectedAcademicYear);
     const currentGroups = groups.filter(g => g.academicYear === selectedAcademicYear);
 
+    if (currentStudents.length === 0 && currentGroups.length === 0) {
+      alert(`No students or groups found for ${selectedAcademicYear} to promote.`);
+      setSaveStatus('idle');
+      return;
+    }
+
     const newStudentsList: Student[] = [...students];
     const newGroupsList: Group[] = [...groups];
 
@@ -847,8 +864,14 @@ export default function App() {
 
     setStudents(newStudentsList);
     setGroups(newGroupsList);
+    
+    // Update filters to follow the cohort
+    const nextYG = getNextYearGroup(yearFilter as YearGroup);
+    if (nextYG) setYearFilter(nextYG);
+    
     setSelectedAcademicYear(nextYear);
     setSaveStatus('saved');
+    alert(`Successfully promoted ${currentStudents.length} students and ${currentGroups.length} groups to ${nextYear}.`);
     setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
@@ -2213,7 +2236,22 @@ export default function App() {
               <select 
                 className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
                 value={selectedAcademicYear}
-                onChange={(e) => setSelectedAcademicYear(e.target.value)}
+                onChange={(e) => {
+                  const oldYear = selectedAcademicYear;
+                  const newYear = e.target.value;
+                  setSelectedAcademicYear(newYear);
+                  
+                  // If moving forward one year, try to follow the cohort
+                  if (getNextAcademicYear(oldYear) === newYear) {
+                    const nextYG = getNextYearGroup(yearFilter as YearGroup);
+                    if (nextYG) setYearFilter(nextYG);
+                  } 
+                  // If moving backward one year, try to follow back
+                  else if (getPreviousAcademicYear(oldYear) === newYear) {
+                    const prevYG = getPreviousYearGroup(yearFilter as YearGroup);
+                    if (prevYG) setYearFilter(prevYG);
+                  }
+                }}
               >
                 {ACADEMIC_YEARS.map(year => (
                   <option key={year} value={year}>{year}</option>
