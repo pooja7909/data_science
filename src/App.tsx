@@ -63,6 +63,7 @@ const SUBJECTS_BY_YEAR: Record<YearGroup, string[]> = {
   '11 IGCSE': ['Computer Science'],
   '12 IB': ['Computer Science'],
   '13 IB': ['Computer Science'],
+  'Graduated': ['Computer Science'],
 };
 
 const SUBJECT_COLORS: Record<string, string> = {
@@ -425,9 +426,10 @@ export default function App() {
       // Find previous year record for this student if in 11 IGCSE or 13 IB
       // This fulfills the requirement: "year 10 moves to year 11, year 12 to year 13 along with all their data"
       let priorMarks: (Mark & { assessment: Assessment })[] = [];
-      if (student.yearGroup === '11 IGCSE' || student.yearGroup === '13 IB') {
+      if (student.yearGroup === '11 IGCSE' || student.yearGroup === '13 IB' || student.yearGroup === 'Graduated') {
         const prevYear = getPreviousAcademicYear(selectedAcademicYear);
-        const prevYearGroup = student.yearGroup === '11 IGCSE' ? '10 IGCSE' : '12 IB';
+        const prevYearGroup = student.yearGroup === '11 IGCSE' ? '10 IGCSE' : 
+                             student.yearGroup === '13 IB' ? '12 IB' : '13 IB';
         if (prevYear) {
           const prevStudent = students.find(s => s.name === student.name && s.yearGroup === prevYearGroup && s.academicYear === prevYear);
           if (prevStudent) {
@@ -704,7 +706,7 @@ export default function App() {
   }, [assessments, marks, selectedAcademicYear]);
 
   const classPerformanceData = useMemo(() => {
-    const yearGroups: YearGroup[] = [7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'];
+    const yearGroups: YearGroup[] = [7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'];
     return yearGroups
       .filter(y => matchesYearFilter(y, yearFilter))
       .map(year => {
@@ -813,7 +815,7 @@ export default function App() {
     // Promote Groups
     currentGroups.forEach(group => {
       const nextYearGroup = getNextYearGroup(group.yearGroup);
-      if (nextYearGroup && nextYearGroup !== 'Graduated') {
+      if (nextYearGroup) {
         const exists = groups.find(g => g.name === group.name && g.yearGroup === nextYearGroup && g.academicYear === nextYear);
         if (!exists) {
           newGroupsList.push({
@@ -829,7 +831,7 @@ export default function App() {
     // Promote Students
     currentStudents.forEach(student => {
       const nextYearGroup = getNextYearGroup(student.yearGroup);
-      if (nextYearGroup && nextYearGroup !== 'Graduated') {
+      if (nextYearGroup) {
         const exists = students.find(s => s.name === student.name && s.yearGroup === nextYearGroup && s.academicYear === nextYear);
         if (!exists) {
           newStudentsList.push({
@@ -2234,7 +2236,7 @@ export default function App() {
               >
                 <option value="IGCSE_ALL">IGCSE (All)</option>
                 <option value="IB_ALL">IB (All)</option>
-                {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
                   <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                 ))}
               </select>
@@ -2916,7 +2918,7 @@ export default function App() {
                       <p className="text-xs text-slate-400 italic">No students found</p>
                     </div>
                   ) : (
-                    ([7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'] as YearGroup[])
+                    ([7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'] as YearGroup[])
                       .filter(y => matchesYearFilter(y, yearFilter))
                       .map(year => {
                         const yearStudents = filteredPerformances.filter(p => p.student.yearGroup === year);
@@ -3198,6 +3200,7 @@ export default function App() {
                     { id: '11 IGCSE', label: 'Y11' },
                     { id: '12 IB', label: 'Y12' },
                     { id: '13 IB', label: 'Y13' },
+                    { id: 'Graduated', label: 'Graduated' },
                   ].map((filter) => (
                     <button
                       key={filter.id}
@@ -3381,7 +3384,7 @@ export default function App() {
                     onChange={(e) => setSelectedSettingScope(e.target.value)}
                   >
                     <optgroup label="Year Groups">
-                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
                         <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                       ))}
                     </optgroup>
@@ -3668,7 +3671,7 @@ export default function App() {
                         });
                       }}
                     >
-                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
                         <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                       ))}
                     </select>
@@ -3776,7 +3779,7 @@ export default function App() {
                       setNewStudent({...newStudent, yearGroup: year, groupName: firstGroup});
                     }}
                   >
-                    {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                    {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
                       <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                     ))}
                   </select>
@@ -4410,7 +4413,7 @@ export default function App() {
                         setImportConfig({ ...importConfig, yearGroup: year, subject: SUBJECTS_BY_YEAR[year][0] });
                       }}
                     >
-                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
                         <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                       ))}
                     </select>
