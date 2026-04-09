@@ -3,6 +3,7 @@ export type YearGroup = 7 | 8 | 9 | '10 IGCSE' | '11 IGCSE' | '12 IB' | '13 IB' 
 export interface Student {
   id: string;
   name: string;
+  preferredName?: string;
   yearGroup: YearGroup;
   groupName: string;
   academicYear: string;
