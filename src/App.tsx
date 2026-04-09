@@ -187,7 +187,7 @@ export default function App() {
   });
   const [marksGroupFilter, setMarksGroupFilter] = useState<string>('all');
   const [newAssessment, setNewAssessment] = useState({ name: '', subject: 'Computer Science', maxMarks: 100, date: new Date().toISOString().split('T')[0], yearGroup: 7 as YearGroup });
-  const [newStudent, setNewStudent] = useState({ name: '', yearGroup: 7 as YearGroup, groupName: '' });
+  const [newStudent, setNewStudent] = useState({ name: '', preferredName: '', yearGroup: 7 as YearGroup, groupName: '' });
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [modalGroupFilter, setModalGroupFilter] = useState<string>('all');
@@ -1335,74 +1335,38 @@ export default function App() {
   const downloadStudentTemplate = () => {
     const wb = XLSX.utils.book_new();
 
-    // ── Sheet 1: Years 7-9 ───────────────────────────────────────────────────
-    const ks3Data = [
-      ['Surname', 'Forename', 'Year Group', 'Group'],
-      ['Ahmed',   'Sarah',    '7',          '7W'],
-      ['Brown',   'James',    '7',          '7W'],
-      ['Clarke',  'Emma',     '7',          '7X'],
-      ['Patel',   'Priya',    '8',          '8A'],
-      ['Wilson',  'Tom',      '8',          '8A'],
-      ['Hassan',  'Yusuf',    '9',          '9B'],
+    // ── Sheet 1: Students ───────────────────────────────────────────────────
+    const studentData = [
+      ['Surname', 'First Name', 'Preferred Name', 'Year', 'Group'],
+      ['Ahmed',   'Sarah',      'Sarah',          '7',    '7W'],
+      ['Brown',   'James',      'Jim',            '10',   '10A'],
+      ['Clarke',  'Emma',       'Emma',           '12',   '12B'],
     ];
-    const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
-    // Style header row width
-    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, ws1, 'Years 7-9');
+    const ws1 = XLSX.utils.aoa_to_sheet(studentData);
+    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Students');
 
-    // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
-    const igcseData = [
-      ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects'],
-      ['Ahmed',   'Sarah',    '10 IGCSE',   '10A',   'Computer Science'],
-      ['Brown',   'James',    '10 IGCSE',   '10A',   'Computer Science'],
-      ['Clarke',  'Emma',     '10 IGCSE',   '10B',   'Computer Science'],
-      ['Patel',   'Priya',    '11 IGCSE',   '11A',   'Computer Science'],
-      ['Wilson',  'Tom',      '11 IGCSE',   '11A',   'Computer Science'],
-    ];
-    const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
-    ws2['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, ws2, 'Years 10-11 IGCSE');
-
-    // ── Sheet 3: Years 12-13 IB ──────────────────────────────────────────────
-    const ibData = [
-      ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels (HL or SL per subject, same order)'],
-      ['Ahmed',   'Sarah',    '12 IB',      '12A',   'Computer Science',            'HL'],
-      ['Brown',   'James',    '12 IB',      '12A',   'Computer Science',          'HL'],
-      ['Clarke',  'Emma',     '12 IB',      '12B',   'Computer Science',        'SL'],
-      ['Patel',   'Priya',    '13 IB',      '13A',   'Computer Science',     'HL'],
-      ['Wilson',  'Tom',      '13 IB',      '13A',   'Computer Science',                 'HL'],
-    ];
-    const ws3 = XLSX.utils.aoa_to_sheet(ibData);
-    ws3['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 45 }];
-    XLSX.utils.book_append_sheet(wb, ws3, 'Years 12-13 IB');
-
-    // ── Sheet 4: Instructions ────────────────────────────────────────────────
+    // ── Sheet 2: Instructions ────────────────────────────────────────────────
     const instructions = [
       ['STUDENT LIST UPLOAD — INSTRUCTIONS'],
       [''],
-      ['Use the correct sheet for your year group and fill in one row per student.'],
+      ['Fill in one row per student.'],
       [''],
       ['COLUMN GUIDE'],
-      ['Surname',      'Student family name'],
-      ['Forename',     'Student first name'],
-      ['Year Group',   'Must be exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
-      ['Group',        'Class code e.g. 7W, 10A, 12B — must match exactly across sheets'],
-      ['Subjects',     'IGCSE & IB only. Comma-separated from: Computer Science'],
-      ['Levels',       'IB only. One HL or SL per subject in the same order as the Subjects column'],
-      [''],
-      ['SUBJECTS BY YEAR'],
-      ['Years 7-13',    'Computer Science'],
+      ['Surname',        'Student family name'],
+      ['First Name',     'Student legal first name'],
+      ['Preferred Name', 'Name the student prefers to be called'],
+      ['Year',           'Year group (e.g. 7, 8, 9, 10, 11, 12, 13)'],
+      ['Group',          'Class code e.g. 7W, 10A, 12B'],
       [''],
       ['TIPS'],
-      ['• Delete the example rows before uploading — keep only the header row and your students.'],
-      ['• Year group values must match exactly (e.g. "10 IGCSE" not "Year 10" or "10").'],
-      ['• Group names are case-sensitive — "10A" and "10a" will be treated as different groups.'],
-      ['• For IB students, the Levels column must have the same number of entries as Subjects.'],
-      ['• You can upload separate sheets for each year group or combine them in one file.'],
+      ['• Delete the example rows before uploading.'],
+      ['• Year 10/11 will be treated as IGCSE, Year 12/13 as IB.'],
+      ['• Group names are case-sensitive.'],
     ];
-    const ws4 = XLSX.utils.aoa_to_sheet(instructions);
-    ws4['!cols'] = [{ wch: 20 }, { wch: 70 }];
-    XLSX.utils.book_append_sheet(wb, ws4, 'Instructions');
+    const ws2 = XLSX.utils.aoa_to_sheet(instructions);
+    ws2['!cols'] = [{ wch: 20 }, { wch: 70 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
 
     XLSX.writeFile(wb, 'Student_List_Template.xlsx');
   };
@@ -1412,12 +1376,12 @@ export default function App() {
 
     // ── Sheet 1: Years 7-9 (Computer Science) ─────────────────────
     // One row per student per subject. Assessment columns = "Assessment Name (max marks)"
-    const ks3Headers = ['Surname', 'Forename', 'Year Group', 'Group', 'Subject', 'Test 1 (50)', 'Test 2 (30)', 'End of Term (100)'];
+    const ks3Headers = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subject', 'Test 1 (50)', 'Test 2 (30)', 'End of Term (100)'];
     const ks3Data = [
       ks3Headers,
-      ['Ahmed',  'Sarah', '7', '7W', 'Computer Science', 38, 22, 65],
-      ['Brown',  'James', '7', '7W', 'Computer Science', 40, 20, 70],
-      ['Clarke', 'Emma',  '8', '8A', 'Computer Science', 44, 26, 75],
+      ['Ahmed',  'Sarah', 'Sarah', '7', '7W', 'Computer Science', 38, 22, 65],
+      ['Brown',  'James', 'Jim', '7', '7W', 'Computer Science', 40, 20, 70],
+      ['Clarke', 'Emma',  'Emma', '8', '8A', 'Computer Science', 44, 26, 75],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
     ws1['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
@@ -1426,12 +1390,12 @@ export default function App() {
     // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
     // Option A: one row per student, subject encoded in column headers
     // Assessment columns use "Assessment Name - Subject (maxMarks)" format
-    const igcseHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Programming - Computer Science (35)', 'Mock - Computer Science (100)'];
+    const igcseHeaders = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subjects', 'Programming - Computer Science (35)', 'Mock - Computer Science (100)'];
     const igcseData = [
       igcseHeaders,
-      ['Ahmed',  'Sarah', '10 IGCSE', '10A', 'Computer Science',    32, 72],
-      ['Brown',  'James', '10 IGCSE', '10A', 'Computer Science',    28, 60],
-      ['Clarke', 'Emma',  '11 IGCSE', '11A', 'Computer Science',    30, 75],
+      ['Ahmed',  'Sarah', 'Sarah', '10 IGCSE', '10A', 'Computer Science',    32, 72],
+      ['Brown',  'James', 'Jim', '10 IGCSE', '10A', 'Computer Science',    28, 60],
+      ['Clarke', 'Emma',  'Emma', '11 IGCSE', '11A', 'Computer Science',    30, 75],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
     ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 24 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 20 }];
@@ -1439,12 +1403,12 @@ export default function App() {
 
     // ── Sheet 3: Years 12-13 IB (with Level column) ──────────────────────────
     // Subject encoded in column headers — one row per student
-    const ibHeaders = ['Surname', 'Forename', 'Year Group', 'Group', 'Subjects', 'Levels', 'Test 1 - Computer Science (45)', 'Mock - Computer Science (100)'];
+    const ibHeaders = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subjects', 'Levels', 'Test 1 - Computer Science (45)', 'Mock - Computer Science (100)'];
     const ibData = [
       ibHeaders,
-      ['Ahmed',  'Sarah', '12 IB', '12A', 'Computer Science',      'HL', 38, 75],
-      ['Brown',  'James', '12 IB', '12A', 'Computer Science',   'SL',    22,  ''],
-      ['Clarke', 'Emma',  '13 IB', '13A', 'Computer Science',          'HL',    42, 82],
+      ['Ahmed',  'Sarah', 'Sarah', '12 IB', '12A', 'Computer Science',      'HL', 38, 75],
+      ['Brown',  'James', 'Jim', '12 IB', '12A', 'Computer Science',   'SL',    22,  ''],
+      ['Clarke', 'Emma',  'Emma', '13 IB', '13A', 'Computer Science',          'HL',    42, 82],
     ];
     const ws3 = XLSX.utils.aoa_to_sheet(ibData);
     ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 28 }, { wch: 12 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 20 }, { wch: 22 }];
@@ -1464,7 +1428,8 @@ export default function App() {
       [''],
       ['COLUMN GUIDE'],
       ['Surname',      'Student family name — must match exactly the name already in the app'],
-      ['Forename',     'Student first name — must match exactly the name already in the app'],
+      ['First Name',     'Student first name — must match exactly the name already in the app'],
+      ['Preferred Name', 'Optional. Student preferred name'],
       ['Year Group',   'Exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
       ['Group',        'Class code e.g. 7W, 10A — must match what is in the app'],
       ['Subject',      'Must be: Computer Science'],
@@ -1725,17 +1690,18 @@ export default function App() {
     const dataToProcess = isFirstRowSubHeader ? data.slice(1) : data;
 
     dataToProcess.forEach((row: any) => {
-      // Support both "Student Name" single column and "Surname" + "Forename" split columns
+      // Support both "Student Name" single column and "Surname" + "First Name" split columns
       let studentNameRaw = findValue(row, ['studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname']);
       if (!studentNameRaw) {
         const surname = findValue(row, ['surname', 'lastname', 'last name', 'familyname']);
-        const forename = findValue(row, ['forename', 'firstname', 'first name', 'givenname']);
+        const forename = findValue(row, ['forename', 'firstname', 'first name', 'givenname', 'forename']);
         if (surname || forename) {
           studentNameRaw = `${String(forename || '').trim()} ${String(surname || '').trim()}`.trim();
         }
       }
       if (!studentNameRaw) return;
       const studentName = String(studentNameRaw).trim();
+      const preferredName = findValue(row, ['preferredname', 'preferred name', 'nickname']) || '';
 
       const rowSheetName = row.__sheetName || defaultSheetName;
 
@@ -1749,11 +1715,11 @@ export default function App() {
         const s = String(rowYearGroupRaw).trim().toLowerCase();
         if (s.includes('10')) return '10 IGCSE' as YearGroup;
         if (s.includes('11')) return '11 IGCSE' as YearGroup;
-        if (s.includes('12') && s.includes('ib')) return '12 IB' as YearGroup;
-        if (s.includes('13') && s.includes('ib')) return '13 IB' as YearGroup;
-        if (s === '7') return 7 as YearGroup;
-        if (s === '8') return 8 as YearGroup;
-        if (s === '9') return 9 as YearGroup;
+        if (s.includes('12')) return '12 IB' as YearGroup;
+        if (s.includes('13')) return '13 IB' as YearGroup;
+        if (s.includes('7')) return 7 as YearGroup;
+        if (s.includes('8')) return 8 as YearGroup;
+        if (s.includes('9')) return 9 as YearGroup;
         return yearGroup;
       })();
       // If row says a different year from import config, trust import config (handles data entry errors)
@@ -1807,13 +1773,19 @@ export default function App() {
         student = { 
           id: Math.random().toString(36).substr(2, 9), 
           name: studentName, 
+          preferredName: String(preferredName).trim(),
           yearGroup: effectiveYearGroup,
           groupName: effectiveGroupName,
           academicYear: selectedAcademicYear
         } as any;
         newStudents.push(student);
-      } else if (student.groupName !== effectiveGroupName) {
-        student.groupName = effectiveGroupName;
+      } else {
+        if (student.groupName !== effectiveGroupName) {
+          student.groupName = effectiveGroupName;
+        }
+        if (preferredName) {
+          student.preferredName = String(preferredName).trim();
+        }
       }
 
       // Store subject level on student if provided (e.g. Physics: HL)
@@ -2139,7 +2111,7 @@ export default function App() {
     };
     setStudents(prev => [...prev, student as Student]);
     setShowStudentModal(false);
-    setNewStudent(prev => ({ ...prev, name: '' })); // Keep yearGroup and groupName
+    setNewStudent(prev => ({ ...prev, name: '', preferredName: '' })); // Keep yearGroup and groupName
   };
 
   const handleAddGrade = (isAssessment: boolean = false, assessmentId?: string) => {
@@ -3103,10 +3075,15 @@ export default function App() {
                                         <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
                                           selectedStudentId === p.student.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
                                         }`}>
-                                          {p.student.name.split(' ').map((n: string) => n[0]).join('')}
+                                          {(p.student.preferredName || p.student.name).split(' ').map((n: string) => n[0]).join('')}
                                         </div>
                                         <div className="min-w-0">
-                                          <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">{p.student.name}</p>
+                                          <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">
+                                            {p.student.preferredName || p.student.name}
+                                            {p.student.preferredName && p.student.preferredName !== p.student.name && (
+                                              <span className="ml-1 text-[9px] text-slate-400 font-normal">({p.student.name.split(' ')[0]})</span>
+                                            )}
+                                          </p>
                                           {/* Show HL/SL summary for IB students */}
                                           {(p.student as any).subjectLevels && Object.keys((p.student as any).subjectLevels).length > 0 && (
                                             <p className="text-[8px] text-slate-400 truncate max-w-[100px]">
@@ -3152,7 +3129,12 @@ export default function App() {
                         <div className="card p-6">
                           <div className="flex items-center justify-between mb-8">
                             <div>
-                              <h2 className="text-2xl font-bold text-slate-900">{p.student.name}</h2>
+                              <h2 className="text-2xl font-bold text-slate-900">
+                                {p.student.preferredName || p.student.name}
+                                {p.student.preferredName && p.student.preferredName !== p.student.name && (
+                                  <span className="ml-3 text-lg text-slate-400 font-medium">({p.student.name})</span>
+                                )}
+                              </h2>
                               <p className="text-slate-500">
                                 {formatYearGroup(p.student.yearGroup)} • {p.student.groupName} • {' '}
                                 {(p as any).hasData 
@@ -3859,13 +3841,24 @@ export default function App() {
               <h3 className="text-xl font-bold text-slate-900 mb-6">Add New Student</h3>
               <form onSubmit={handleAddStudent} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Student Name</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Student Name (Legal)</label>
                   <input 
                     required
                     type="text" 
+                    placeholder="e.g. Sarah Ahmed"
                     className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                     value={newStudent.name}
                     onChange={e => setNewStudent({...newStudent, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Preferred Name</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Sarah"
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newStudent.preferredName}
+                    onChange={e => setNewStudent({...newStudent, preferredName: e.target.value})}
                   />
                 </div>
                 <div>
@@ -4702,7 +4695,7 @@ export default function App() {
       </AnimatePresence>
       <footer className="bg-white border-t border-slate-200 py-6 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-sm text-slate-500">© Pooja Arora - Computing Teacher</p>
+          <p className="text-sm text-slate-500">© {new Date().getFullYear()} Pooja Arora. All rights reserved.</p>
         </div>
       </footer>
     </div>
