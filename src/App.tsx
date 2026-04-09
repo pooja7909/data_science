@@ -1374,81 +1374,41 @@ export default function App() {
   const downloadTemplate = () => {
     const wb = XLSX.utils.book_new();
 
-    // ── Sheet 1: Years 7-9 (Computer Science) ─────────────────────
-    // One row per student per subject. Assessment columns = "Assessment Name (max marks)"
-    const ks3Headers = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subject', 'Test 1 (50)', 'Test 2 (30)', 'End of Term (100)'];
-    const ks3Data = [
-      ks3Headers,
-      ['Ahmed',  'Sarah', 'Sarah', '7', '7W', 'Computer Science', 38, 22, 65],
-      ['Brown',  'James', 'Jim', '7', '7W', 'Computer Science', 40, 20, 70],
-      ['Clarke', 'Emma',  'Emma', '8', '8A', 'Computer Science', 44, 26, 75],
+    // ── Sheet 1: Assessment Marks ─────────────────────
+    const headers = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subject', 'Assessment Name', 'Score', 'Max Marks', 'Date'];
+    const data = [
+      headers,
+      ['Ahmed',  'Sarah', 'Sarah', '7', '7W', 'Computer Science', 'Unit Test 1', 38, 50, '2024-01-15'],
+      ['Brown',  'James', 'Jim',   '7', '7W', 'Computer Science', 'Unit Test 1', 40, 50, '2024-01-15'],
     ];
-    const ws1 = XLSX.utils.aoa_to_sheet(ks3Data);
-    ws1['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, ws1, 'Years 7-9 Marks');
+    const ws1 = XLSX.utils.aoa_to_sheet(data);
+    ws1['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Marks');
 
-    // ── Sheet 2: Years 10-11 IGCSE ───────────────────────────────────────────
-    // Option A: one row per student, subject encoded in column headers
-    // Assessment columns use "Assessment Name - Subject (maxMarks)" format
-    const igcseHeaders = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subjects', 'Programming - Computer Science (35)', 'Mock - Computer Science (100)'];
-    const igcseData = [
-      igcseHeaders,
-      ['Ahmed',  'Sarah', 'Sarah', '10 IGCSE', '10A', 'Computer Science',    32, 72],
-      ['Brown',  'James', 'Jim', '10 IGCSE', '10A', 'Computer Science',    28, 60],
-      ['Clarke', 'Emma',  'Emma', '11 IGCSE', '11A', 'Computer Science',    30, 75],
-    ];
-    const ws2 = XLSX.utils.aoa_to_sheet(igcseData);
-    ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 24 }, { wch: 26 }, { wch: 22 }, { wch: 30 }, { wch: 20 }];
-    XLSX.utils.book_append_sheet(wb, ws2, 'Years 10-11 Marks');
-
-    // ── Sheet 3: Years 12-13 IB (with Level column) ──────────────────────────
-    // Subject encoded in column headers — one row per student
-    const ibHeaders = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subjects', 'Levels', 'Test 1 - Computer Science (45)', 'Mock - Computer Science (100)'];
-    const ibData = [
-      ibHeaders,
-      ['Ahmed',  'Sarah', 'Sarah', '12 IB', '12A', 'Computer Science',      'HL', 38, 75],
-      ['Brown',  'James', 'Jim', '12 IB', '12A', 'Computer Science',   'SL',    22,  ''],
-      ['Clarke', 'Emma',  'Emma', '13 IB', '13A', 'Computer Science',          'HL',    42, 82],
-    ];
-    const ws3 = XLSX.utils.aoa_to_sheet(ibData);
-    ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 28 }, { wch: 12 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 20 }, { wch: 22 }];
-    XLSX.utils.book_append_sheet(wb, ws3, 'Years 12-13 IB Marks');
-
-    // ── Sheet 4: Instructions ────────────────────────────────────────────────
+    // ── Sheet 2: Instructions ────────────────────────────────────────────────
     const instructions = [
       ['ASSESSMENT MARKS UPLOAD — INSTRUCTIONS'],
       [''],
       ['HOW TO USE THIS TEMPLATE'],
-      ['1.', 'Choose the correct sheet for your year group (Years 7-9, IGCSE, or IB).'],
-      ['2.', 'Delete the example rows — keep only the header row.'],
-      ['3.', 'Add one row per student per subject (e.g. Sarah Ahmed appears once for Physics, once for Chemistry).'],
-      ['4.', 'Add or rename assessment columns as needed — include max marks in brackets e.g. "Unit Test (40)".'],
-      ['5.', 'Leave a cell blank if a student has not yet sat that assessment.'],
-      ['6.', 'Save the file and upload it using the "Upload Completed File" button.'],
+      ['1.', 'Fill in one row per student per assessment.'],
+      ['2.', 'Surname, First Name, and Year Group are required.'],
+      ['3.', 'Assessment Name, Score, and Max Marks are used to record results.'],
       [''],
       ['COLUMN GUIDE'],
-      ['Surname',      'Student family name — must match exactly the name already in the app'],
-      ['First Name',     'Student first name — must match exactly the name already in the app'],
-      ['Preferred Name', 'Optional. Student preferred name'],
-      ['Year Group',   'Exactly: 7, 8, 9, 10 IGCSE, 11 IGCSE, 12 IB, or 13 IB'],
-      ['Group',        'Class code e.g. 7W, 10A — must match what is in the app'],
-      ['Subject',      'Must be: Computer Science'],
-      ['Level',        'IB only: HL or SL for each row'],
-      ['Assessment columns', 'Format: "Assessment Name - Subject (max marks)" e.g. "Paper 1 - Physics (80)" or just "Test 1 (50)" if one subject per row'],
-      [''],
-      ['TIPS'],
-      ['• You can have as many assessment columns as you like.'],
-      ['• KEY: For IGCSE/IB, put the subject in the column header: "Paper 1 - Physics (80)". This tells the app which subject each assessment belongs to.'],
-      ['• Leave a cell blank if a student did not sit that assessment — blank cells are skipped.'],
-      ['• If a student does not have a mark for an assessment, leave the cell empty.'],
-      ['• Student names must match exactly what is already in the app (same spelling and spacing).'],
-      ['• If a student is not yet in the app they will be created automatically on import.'],
-      ['• You can mix multiple classes on one sheet — the Group column separates them.'],
-      ['• Multiple sheets in one workbook are all imported at once.'],
+      ['Surname',        'Student family name'],
+      ['First Name',     'Student legal first name'],
+      ['Preferred Name', 'Optional. Name the student prefers'],
+      ['Year Group',     '7, 8, 9, 10, 11, 12, 13'],
+      ['Group',          'Class code e.g. 7W, 10A'],
+      ['Subject',        'e.g. Computer Science'],
+      ['Assessment Name','Name of the test/exam'],
+      ['Score',          'The mark achieved'],
+      ['Max Marks',      'Total possible marks'],
+      ['Date',           'YYYY-MM-DD format'],
     ];
-    const ws4 = XLSX.utils.aoa_to_sheet(instructions);
-    ws4['!cols'] = [{ wch: 22 }, { wch: 75 }];
-    XLSX.utils.book_append_sheet(wb, ws4, 'Instructions');
+    const ws2 = XLSX.utils.aoa_to_sheet(instructions);
+    ws2['!cols'] = [{ wch: 22 }, { wch: 75 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
 
     XLSX.writeFile(wb, 'Assessment_Marks_Template.xlsx');
   };
@@ -2961,6 +2921,13 @@ export default function App() {
                   >
                     <Plus className="w-4 h-4" />
                     Add Student
+                  </button>
+                  <button 
+                    onClick={downloadStudentTemplate}
+                    className="btn-secondary w-full flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download Student Template
                   </button>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
