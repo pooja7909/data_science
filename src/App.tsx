@@ -2149,7 +2149,11 @@ export default function App() {
     });
   };
 
-  const handleUpdateMark = (studentId: string, assessmentId: string, score: number) => {
+  const handleUpdateMark = (studentId: string, assessmentId: string, score: number | null) => {
+    if (score === null) {
+      setMarks(prev => prev.filter(m => !(m.studentId === studentId && m.assessmentId === assessmentId)));
+      return;
+    }
     const assessment = assessments.find(a => a.id === assessmentId);
     const maxMarks = assessment?.maxMarks || 100;
     const validatedScore = Math.min(maxMarks, Math.max(0, score));
@@ -4266,7 +4270,10 @@ export default function App() {
                                         value={(mark as any)?.absent ? '' : (mark?.score ?? '')}
                                         min="0"
                                         max={assessment?.maxMarks || 100}
-                                        onChange={e => handleUpdateMark(student.id, showMarksModal, parseFloat(e.target.value) || 0)}
+                                        onChange={e => {
+                                          const val = e.target.value;
+                                          handleUpdateMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                        }}
                                       />
                                       <span className={`text-[9px] font-bold w-7 text-right ${
                                         (mark as any)?.absent ? 'text-rose-400' : mark === undefined ? 'text-amber-400' : 'text-slate-400'
