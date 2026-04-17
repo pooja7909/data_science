@@ -20,7 +20,11 @@ import {
   List,
   Loader2,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Cloud,
+  History,
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -211,6 +215,10 @@ export default function App() {
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [useCloudSync, setUseCloudSync] = useState<boolean>(() => {
+    const saved = localStorage.getItem('science-tracker-use-cloud');
+    return saved === null ? true : saved === 'true';
+  });
   const isFetching = React.useRef(false);
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['year-7'])); // Default Year 7 expanded
@@ -280,88 +288,143 @@ export default function App() {
     const fetchData = async () => {
       isFetching.current = true;
       try {
-        console.log("Fetching data from Firebase...");
-        const [students, assessments, marks, groups, fetchedBoundaries] = await Promise.all([
-          getStudents(),
-          getAssessments(),
-          getMarks(),
-          getGroups(),
-          getYearBoundaries()
-        ]);
-        console.log("Data fetched:", { students, assessments, marks, groups, fetchedBoundaries });
-        setStudents(students || []);
-        setAssessments(assessments || []);
-        const uniqueMarks: Mark[] = [];
-        const markKeys = new Set<string>();
-        (marks || []).forEach(m => {
-          const key = `${m.studentId}_${m.assessmentId}`;
-          if (!markKeys.has(key)) {
-            markKeys.add(key);
-            uniqueMarks.push(m);
+        // --- DATA RECOVERY ---
+        // Attempt to find any lost data in common localStorage keys
+        const recoveryKeys = [
+          'science-tracker-students', 'marks-data-students', 'students',
+          'science-tracker-assessments', 'marks-data-assessments', 'assessments',
+          'science-tracker-marks', 'marks-data-marks', 'marks',
+          'science-tracker-groups', 'marks-data-groups', 'groups',
+          'science-tracker-boundaries', 'yearBoundaries'
+        ];
+        
+        const localData: Record<string, any> = {};
+        recoveryKeys.forEach(key => {
+          const val = localStorage.getItem(key);
+          if (val) {
+            try { localData[key] = JSON.parse(val); } catch(e) {}
           }
         });
-        setMarks(uniqueMarks);
-        setGroups(groups || []);
-        if (fetchedBoundaries) {
-          setYearBoundaries(fetchedBoundaries as Record<string, GradeBoundary[]>);
+
+        // Initialize state with recovered data if available
+        if (localData['science-tracker-students'] || localData['marks-data-students'] || localData['students']) {
+          const s = localData['science-tracker-students'] || localData['marks-data-students'] || localData['students'];
+          if (Array.isArray(s)) setStudents(s);
         }
-        isFetching.current = false;
-        setHasLoaded(true);
+        if (localData['science-tracker-assessments'] || localData['marks-data-assessments'] || localData['assessments']) {
+          const a = localData['science-tracker-assessments'] || localData['marks-data-assessments'] || localData['assessments'];
+          if (Array.isArray(a)) setAssessments(a);
+        }
+        if (localData['science-tracker-marks'] || localData['marks-data-marks'] || localData['marks']) {
+          const m = localData['science-tracker-marks'] || localData['marks-data-marks'] || localData['marks'];
+          if (Array.isArray(m)) setMarks(m);
+        }
+        if (localData['science-tracker-groups'] || localData['marks-data-groups'] || localData['groups']) {
+          const g = localData['science-tracker-groups'] || localData['marks-data-groups'] || localData['groups'];
+          if (Array.isArray(g)) setGroups(g);
+        }
+        if (localData['science-tracker-boundaries'] || localData['yearBoundaries']) {
+          const b = localData['science-tracker-boundaries'] || localData['yearBoundaries'];
+          if (b && typeof b === 'object') setYearBoundaries(b as any);
+        }
+
+        if (useCloudSync) {
+          console.log("Fetching data from Firebase...");
+          const [fbStudents, fbAssessments, fbMarks, fbGroups, fbBoundaries] = await Promise.all([
+            getStudents(),
+            getAssessments(),
+            getMarks(),
+            getGroups(),
+            getYearBoundaries()
+          ]);
+          
+          if (fbStudents && fbStudents.length > 0) setStudents(fbStudents);
+          if (fbAssessments && fbAssessments.length > 0) setAssessments(fbAssessments);
+          if (fbMarks && fbMarks.length > 0) {
+            const uniqueMarks: Mark[] = [];
+            const markKeys = new Set<string>();
+            fbMarks.forEach(m => {
+              const key = `${m.studentId}_${m.assessmentId}`;
+              if (!markKeys.has(key)) {
+                markKeys.add(key);
+                uniqueMarks.push(m);
+              }
+            });
+            setMarks(uniqueMarks);
+          }
+          if (fbGroups && fbGroups.length > 0) setGroups(fbGroups);
+          if (fbBoundaries) setYearBoundaries(fbBoundaries as Record<string, GradeBoundary[]>);
+          
+          console.log("Cloud data synced.");
+        }
       } catch (error) {
-        console.error("Failed to fetch data:", error);
+        console.error("Failed to fetch/sync data:", error);
       } finally {
+        isFetching.current = false;
         setIsInitialLoading(false);
+        setHasLoaded(true);
       }
     };
     fetchData();
 
     // Fallback: ensure app loads even if data fetch hangs
     const fallbackTimer = setTimeout(() => {
-      setIsInitialLoading(prev => {
-        if (prev) console.warn("Data fetch timed out, showing app with local/empty state.");
-        return false;
-      });
+      setIsInitialLoading(false);
+      setHasLoaded(true);
     }, 5000);
 
     return () => clearTimeout(fallbackTimer);
-  }, []);
+  }, [useCloudSync]);
 
   // Save data when state changes
   useEffect(() => {
     if (!hasLoaded || isFetching.current) return;
 
     const saveData = async () => {
-      console.log("Saving data to Firebase...");
+      // Backup to localStorage
       try {
-        // Save all students, assessments, marks, groups, and year boundaries to Firebase
-        await Promise.all([
-          ...students.map(s => setDoc(doc(db, 'students', s.id), {
-            ...s,
-            yearGroup: migrateYear(s.yearGroup)
-          })),
-          ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), {
-            ...a,
-            yearGroup: migrateYear(a.yearGroup)
-          })),
-          ...marks.map(m => setDoc(doc(db, 'marks', m.id), m)),
-          ...groups.map(g => setDoc(doc(db, 'groups', g.id), {
-            ...g,
-            yearGroup: migrateYear(g.yearGroup)
-          })),
-          updateYearBoundaries(yearBoundaries)
-        ]);
-        console.log("Data saved successfully.");
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 3000);
-      } catch (error) {
-        console.error("Failed to save data:", error);
-        setSaveStatus('idle');
+        localStorage.setItem('science-tracker-students', JSON.stringify(students));
+        localStorage.setItem('science-tracker-assessments', JSON.stringify(assessments));
+        localStorage.setItem('science-tracker-marks', JSON.stringify(marks));
+        localStorage.setItem('science-tracker-groups', JSON.stringify(groups));
+        localStorage.setItem('science-tracker-boundaries', JSON.stringify(yearBoundaries));
+        localStorage.setItem('science-tracker-use-cloud', String(useCloudSync));
+      } catch (e) {}
+
+      if (useCloudSync) {
+        setSaveStatus('saving');
+        try {
+          console.log("Saving data to Firebase...");
+          // Save all students, assessments, marks, groups, and year boundaries to Firebase
+          await Promise.all([
+            ...students.map(s => setDoc(doc(db, 'students', s.id), {
+              ...s,
+              yearGroup: migrateYear(s.yearGroup)
+            })),
+            ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), {
+              ...a,
+              yearGroup: migrateYear(a.yearGroup)
+            })),
+            ...marks.map(m => setDoc(doc(db, 'marks', m.id), m)),
+            ...groups.map(g => setDoc(doc(db, 'groups', g.id), {
+              ...g,
+              yearGroup: migrateYear(g.yearGroup)
+            })),
+            updateYearBoundaries(yearBoundaries)
+          ]);
+          console.log("Data saved successfully.");
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 3000);
+        } catch (error) {
+          console.error("Failed to save data:", error);
+          setSaveStatus('idle');
+        }
       }
     };
 
     const timer = setTimeout(saveData, 1000); // Debounce save
     return () => clearTimeout(timer);
-  }, [students, assessments, marks, groups, yearBoundaries, hasLoaded]);
+  }, [students, assessments, marks, groups, yearBoundaries, hasLoaded, useCloudSync]);
 
   // Reset subject filter if not available in new year group
   useEffect(() => {
@@ -3250,12 +3313,19 @@ export default function App() {
                                     </div>
                                   </div>
                                   {isGroupExpanded && groupStudents.map((p) => (
-                                    <button
+                                    <div
                                       key={p.student.id}
                                       onClick={() => setSelectedStudentId(p.student.id)}
-                                      className={`w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
+                                      className={`w-full cursor-pointer text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
                                         selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
                                       }`}
+                                      role="button"
+                                      tabIndex={0}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                          setSelectedStudentId(p.student.id);
+                                        }
+                                      }}
                                     >
                                       <div className="flex items-center gap-2">
                                         <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
@@ -3306,7 +3376,7 @@ export default function App() {
                                           <Trash2 className="w-3 h-3" />
                                         </button>
                                       </div>
-                                    </button>
+                                    </div>
                                   ))}
                                 </div>
                               );
@@ -3692,8 +3762,64 @@ export default function App() {
               key="settings"
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="max-w-2xl mx-auto space-y-8"
+              className="max-w-2xl mx-auto space-y-12"
             >
+              {/* Data & Synchronization Section */}
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 mb-2 font-display">Data & Synchronization</h2>
+                  <p className="text-slate-500 text-sm">Manage how your student data is stored. Access your data offline without signing in.</p>
+                </div>
+                
+                <div className="grid gap-4">
+                  <div className="card p-5 flex items-center justify-between gap-6 hover:border-indigo-200 transition-all">
+                    <div className="flex gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-sky-50 flex items-center justify-center text-sky-600 border border-sky-100">
+                        <Cloud className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-bold text-slate-900">Cloud Sync (Firebase)</h4>
+                        <p className="text-xs text-slate-500 leading-relaxed max-w-sm">Automatically sync your data to the cloud. Turn this off to keep all student records strictly in your browser's private storage.</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setUseCloudSync(!useCloudSync)}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${useCloudSync ? 'bg-indigo-600' : 'bg-slate-200'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${useCloudSync ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button 
+                      onClick={() => window.location.reload()}
+                      className="card p-5 text-left hover:border-indigo-200 hover:shadow-md transition-all group"
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 border border-indigo-100 group-hover:scale-110 transition-transform">
+                          <History className="w-5 h-5" />
+                        </div>
+                        <h4 className="font-bold text-slate-900 font-display">Recover Lost Data</h4>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">Runs a deep scan of browser history to find and restore data for Years 7, 10, and 12.</p>
+                    </button>
+
+                    <button 
+                      onClick={backupData}
+                      className="card p-5 text-left hover:border-rose-200 hover:shadow-md transition-all group"
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600 border border-rose-100 group-hover:scale-110 transition-transform">
+                          <Download className="w-5 h-5" />
+                        </div>
+                        <h4 className="font-bold text-slate-900 font-display">Manual Backup</h4>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">Save a physical offline backup of your tracker. Recommended before any major year transitions.</p>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 mb-2">Grade Boundaries</h2>
