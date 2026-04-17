@@ -2,85 +2,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: students
-    // Fields: id, name, preferredName, yearGroup, groupName, academicYear, ibLevel
-    //
-    // Collection: groups
-    // Fields: id, yearGroup, name, academicYear
-    //
-    // Collection: assessments
-    // Fields: id, name, subject, date, maxMarks, yearGroup, academicYear, boundaries, questions
-    //
-    // Collection: marks
-    // Fields: id, studentId, assessmentId, score, questionScores
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
+    // Assumed Data Model & Validators
     // ===============================================================
     
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "poojaaro@gmail.com" && request.auth.token.email_verified == true));
-    }
-
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
-    }
-
     function isValidDateString(dateStr) {
-      return dateStr is string &&
-        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
     }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-
-    function isValidStudent(data) {
-      return data.id is string &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.yearGroup != null &&
-             data.groupName is string &&
-             data.academicYear is string;
-    }
-
-    function isValidGroup(data) {
-      return data.id is string &&
-             data.yearGroup != null &&
-             data.name is string && data.name.size() > 0 &&
-             data.academicYear is string;
-    }
-
-    function isValidAssessment(data) {
-      return data.id is string &&
-             data.name is string && data.name.size() > 0 &&
-             data.subject is string &&
-             isValidDateString(data.date) &&
-             data.maxMarks is number && data.maxMarks > 0 &&
-             data.yearGroup != null &&
-             data.academicYear is string;
-    }
-
-    function isValidMark(data) {
-      return data.id is string &&
-             data.studentId is string &&
-             data.assessmentId is string &&
-             data.score is number;
-    }
-
-    // ===============================================================
-    // Match Rules
-    // ===============================================================
 
     match /students/{studentId} {
       allow read, write: if true;
@@ -102,7 +29,6 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }
