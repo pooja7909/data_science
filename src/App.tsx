@@ -211,6 +211,7 @@ export default function App() {
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
   const [showPaperGradingModal, setShowPaperGradingModal] = useState<string | null>(null);
   const [extractionMode, setExtractionMode] = useState<'questions' | 'subparts'>('questions');
+  const [marksheetSort, setMarksheetSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'level', direction: 'asc' });
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -614,6 +615,42 @@ export default function App() {
       return matchesSearch && matchesYear && matchesGroup && matchesSubject && matchesLevel;
     });
   }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter, ibLevelFilter]);
+
+  const sortedMarksheetPerformances = useMemo(() => {
+    return [...filteredPerformances].sort((a, b) => {
+      const isIB = a.student.yearGroup === '12 IB' || a.student.yearGroup === '13 IB' || 
+                   b.student.yearGroup === '12 IB' || b.student.yearGroup === '13 IB';
+
+      if (marksheetSort.key === 'level' && isIB) {
+        // IB Sort: HL then SL, then Name
+        const levelOrder = { 'HL': 0, 'SL': 1, 'undefined': 2 };
+        const levelA = a.student.ibLevel || 'undefined';
+        const levelB = b.student.ibLevel || 'undefined';
+        
+        if (levelOrder[levelA] !== levelOrder[levelB]) {
+          return marksheetSort.direction === 'asc' 
+            ? levelOrder[levelA] - levelOrder[levelB]
+            : levelOrder[levelB] - levelOrder[levelA];
+        }
+        return a.student.name.localeCompare(b.student.name);
+      }
+
+      if (marksheetSort.key === 'name') {
+        return marksheetSort.direction === 'asc' 
+          ? a.student.name.localeCompare(b.student.name)
+          : b.student.name.localeCompare(a.student.name);
+      }
+
+      if (marksheetSort.key === 'avg') {
+        return marksheetSort.direction === 'asc'
+          ? a.averagePercentage - b.averagePercentage
+          : b.averagePercentage - a.averagePercentage;
+      }
+
+      // Default sort (by level if IB, else name)
+      return a.student.name.localeCompare(b.student.name);
+    });
+  }, [filteredPerformances, marksheetSort]);
 
   const availableGroups = useMemo(() => {
     const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
@@ -3074,8 +3111,25 @@ export default function App() {
                       <table className="w-full text-left border-collapse min-w-[800px]">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200">
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest sticky left-0 bg-slate-50 z-20 border-r border-slate-200 min-w-[150px]">Student Name</th>
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200">Avg %</th>
+                            <th 
+                              className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest sticky left-0 bg-slate-50 z-20 border-r border-slate-200 min-w-[150px] cursor-pointer hover:bg-slate-100 transition-colors"
+                              onClick={() => setMarksheetSort(prev => ({ key: 'name', direction: prev.key === 'name' && prev.direction === 'asc' ? 'desc' : 'asc' }))}
+                            >
+                              <div className="flex items-center gap-1">
+                                Student Name
+                                {(yearFilter === '12 IB' || yearFilter === '13 IB' || yearFilter === 'IB_ALL') && marksheetSort.key === 'level' && <span className="text-[8px] bg-indigo-100 text-indigo-600 px-1 rounded ml-1">HL/SL</span>}
+                                {marksheetSort.key === 'name' && (marksheetSort.direction === 'asc' ? '↑' : '↓')}
+                              </div>
+                            </th>
+                            <th 
+                              className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors"
+                              onClick={() => setMarksheetSort(prev => ({ key: 'avg', direction: prev.key === 'avg' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
+                            >
+                              <div className="flex items-center justify-center gap-1">
+                                Avg %
+                                {marksheetSort.key === 'avg' && (marksheetSort.direction === 'asc' ? '↑' : '↓')}
+                              </div>
+                            </th>
                             {performanceTabAssessments.map(a => (
                               <th key={a.id} className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center min-w-[100px] border-r border-slate-200 last:border-r-0">
                                 <div className="flex flex-col items-center">
@@ -3087,7 +3141,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {filteredPerformances.length > 0 ? filteredPerformances.map(p => {
+                          {sortedMarksheetPerformances.length > 0 ? sortedMarksheetPerformances.map(p => {
                             return (
                               <tr key={p.student.id} className={`${p.student.isNew ? 'bg-amber-50/50' : ''} hover:bg-indigo-50/30 transition-colors group`}>
                                 <td className={`py-2.5 px-4 sticky left-0 ${p.student.isNew ? 'bg-amber-50/90' : 'bg-white'} group-hover:bg-indigo-50/30 z-10 border-r border-slate-200 shadow-[1px_0_3px_rgba(0,0,0,0.05)]`}>
@@ -3279,108 +3333,182 @@ export default function App() {
                                 </select>
                               </div>
                             </div>
-                            {isYearExpanded && yearGroups.map(groupName => {
-                              const groupStudents = yearStudents
-                                .filter(p => p.student.groupName === groupName)
-                                .sort((a, b) => a.student.name.localeCompare(b.student.name));
-                              const groupSectionId = `group-${year}-${groupName}`;
-                              const isGroupExpanded = expandedSections.has(groupSectionId);
+                            {isYearExpanded && (
+                              (year === '12 IB' || year === '13 IB') ? (
+                                ['HL', 'SL'].map(level => {
+                                  const levelStudentsFromYear = yearStudents.filter(p => p.student.ibLevel === level);
+                                  const levelGroups = (Array.from(new Set(levelStudentsFromYear.map(p => p.student.groupName))).filter(Boolean) as string[]).sort((a, b) => a.localeCompare(b));
+                                  
+                                  if (levelGroups.length === 0) return null;
 
-                              return (
-                                <div key={groupName}>
-                                  <div 
-                                    onClick={() => toggleSection(groupSectionId)}
-                                    className="px-4 py-1.5 bg-white flex items-center justify-between group/header cursor-pointer hover:bg-slate-50 transition-colors"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      {isGroupExpanded ? <ChevronDown className="w-2.5 h-2.5 text-indigo-300" /> : <ChevronRight className="w-2.5 h-2.5 text-indigo-300" />}
-                                      <h5 className="text-[9px] font-bold uppercase tracking-tighter text-indigo-400">Group {groupName}</h5>
+                                  return (
+                                    <div key={level} className="border-l-2 border-indigo-100 ml-2">
+                                      <div className="px-4 py-1 bg-indigo-50/50 flex items-center justify-between">
+                                        <span className="text-[8px] font-black uppercase tracking-widest text-indigo-500">{level} Level Classes</span>
+                                        <span className="text-[7px] font-bold text-indigo-300">{levelStudentsFromYear.length} students</span>
+                                      </div>
+                                      {levelGroups.map(groupName => {
+                                        const groupPerformance = levelStudentsFromYear
+                                          .filter(p => p.student.groupName === groupName)
+                                          .sort((a, b) => a.student.name.localeCompare(b.student.name));
+                                        
+                                        const groupSectionId = `group-${year}-${level}-${groupName}`;
+                                        const isGroupExpanded = expandedSections.has(groupSectionId);
+
+                                        return (
+                                          <div key={groupName} className="border-b border-slate-50 last:border-0 text-left">
+                                            <div 
+                                              onClick={() => toggleSection(groupSectionId)}
+                                              className="px-4 py-1.5 bg-white flex items-center justify-between group/header cursor-pointer hover:bg-indigo-50/20 transition-colors"
+                                            >
+                                              <div className="flex items-center gap-2">
+                                                {isGroupExpanded ? <ChevronDown className="w-2.5 h-2.5 text-indigo-300" /> : <ChevronRight className="w-2.5 h-2.5 text-indigo-300" />}
+                                                <h5 className="text-[9px] font-bold uppercase tracking-tighter text-indigo-400">Class {groupName}</h5>
+                                              </div>
+                                              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                                <button 
+                                                  onClick={() => handleDeleteClass(year as YearGroup, groupName as string)}
+                                                  className="opacity-0 group-hover/header:opacity-100 flex items-center gap-1 text-[8px] font-bold text-rose-500 hover:text-rose-600 transition-all"
+                                                >
+                                                  <Trash2 className="w-2.5 h-2.5" />
+                                                  Delete
+                                                </button>
+                                              </div>
+                                            </div>
+                                            {isGroupExpanded && groupPerformance.map((p) => (
+                                              <div
+                                                key={p.student.id}
+                                                onClick={() => setSelectedStudentId(p.student.id)}
+                                                className={`w-full cursor-pointer px-3 py-1.5 transition-colors flex items-center justify-between group ${
+                                                  selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
+                                                }`}
+                                                role="button"
+                                                tabIndex={0}
+                                                onKeyDown={(e) => {
+                                                  if (e.key === 'Enter' || e.key === ' ') {
+                                                    setSelectedStudentId(p.student.id);
+                                                  }
+                                                }}
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
+                                                    selectedStudentId === p.student.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
+                                                  }`}>
+                                                    {(p.student.preferredName || p.student.name).split(' ').map((n: string) => n[0]).join('')}
+                                                  </div>
+                                                  <div className="min-w-0">
+                                                    <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">
+                                                      {p.student.preferredName || p.student.name}
+                                                      {p.student.isNew && <span className="ml-1 text-[7px] text-amber-500 uppercase">New</span>}
+                                                    </p>
+                                                  </div>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className={`text-[8px] px-1 py-0.5 rounded-full border ${getStatusColor(p.status)}`}>
+                                                    {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
+                                                  </span>
+                                                  <button 
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleDeleteStudent(p.student.id);
+                                                    }}
+                                                    className="opacity-0 group-hover:opacity-100 p-0.5 text-rose-500"
+                                                  >
+                                                    <Trash2 className="w-2.5 h-2.5" />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        );
+                                      })}
                                     </div>
-                                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                                      {groupStudents.length > 0 && (
-                                        <button 
-                                          onClick={() => handleDeleteClass(year as YearGroup, groupName as string)}
-                                          className="opacity-0 group-hover/header:opacity-100 flex items-center gap-1 text-[8px] font-bold text-rose-500 hover:text-rose-600 transition-all"
-                                          title="Delete all students in this class"
-                                        >
-                                          <Trash2 className="w-2.5 h-2.5" />
-                                          Delete Class
-                                        </button>
-                                      )}
-                                      {groupStudents.length === 0 && (
-                                        <span className="text-[8px] text-slate-300 italic">Empty</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {isGroupExpanded && groupStudents.map((p) => (
-                                    <div
-                                      key={p.student.id}
-                                      onClick={() => setSelectedStudentId(p.student.id)}
-                                      className={`w-full cursor-pointer text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
-                                        selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
-                                      }`}
-                                      role="button"
-                                      tabIndex={0}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                          setSelectedStudentId(p.student.id);
-                                        }
-                                      }}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
-                                          selectedStudentId === p.student.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
-                                        }`}>
-                                          {(p.student.preferredName || p.student.name).split(' ').map((n: string) => n[0]).join('')}
+                                  );
+                                })
+                              ) : (
+                                yearGroups.map(groupName => {
+                                  const groupStudents = yearStudents
+                                    .filter(p => p.student.groupName === groupName)
+                                    .sort((a, b) => a.student.name.localeCompare(b.student.name));
+                                  const groupSectionId = `group-${year}-${groupName}`;
+                                  const isGroupExpanded = expandedSections.has(groupSectionId);
+
+                                  return (
+                                    <div key={groupName}>
+                                      <div 
+                                        onClick={() => toggleSection(groupSectionId)}
+                                        className="px-4 py-1.5 bg-white flex items-center justify-between group/header cursor-pointer hover:bg-slate-50 transition-colors"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          {isGroupExpanded ? <ChevronDown className="w-2.5 h-2.5 text-indigo-300" /> : <ChevronRight className="w-2.5 h-2.5 text-indigo-300" />}
+                                          <h5 className="text-[9px] font-bold uppercase tracking-tighter text-indigo-400">Class {groupName}</h5>
                                         </div>
-                                        <div className="min-w-0">
-                                          <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">
-                                            {p.student.preferredName || p.student.name}
-                                            {p.student.isNew && (
-                                              <span className="ml-1.5 px-1 py-0.5 rounded text-[7px] font-black bg-amber-100 text-amber-600 border border-amber-200 uppercase tracking-tighter">
-                                                New
-                                              </span>
-                                            )}
-                                            {p.student.ibLevel && (
-                                              <span className={`ml-1.5 px-1 py-0.5 rounded text-[8px] font-bold ${
-                                                p.student.ibLevel === 'HL' ? 'bg-violet-100 text-violet-600 border border-violet-200' : 'bg-sky-100 text-sky-600 border border-sky-200'
-                                              }`}>
-                                                {p.student.ibLevel}
-                                              </span>
-                                            )}
-                                            {p.student.preferredName && p.student.preferredName !== p.student.name && (
-                                              <span className="ml-1 text-[9px] text-slate-400 font-normal">({p.student.name.split(' ')[0]})</span>
-                                            )}
-                                          </p>
-                                          {/* Show HL/SL summary for IB students */}
-                                          {(p.student as any).subjectLevels && Object.keys((p.student as any).subjectLevels).length > 0 && (
-                                            <p className="text-[8px] text-slate-400 truncate max-w-[100px]">
-                                              {Object.entries((p.student as any).subjectLevels as Record<string,string>)
-                                                .map(([s, l]) => `${s.split(' ')[0]} ${l}`).join(' · ')}
-                                            </p>
+                                        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                          {groupStudents.length > 0 && (
+                                            <button 
+                                              onClick={() => handleDeleteClass(year as YearGroup, groupName as string)}
+                                              className="opacity-0 group-hover/header:opacity-100 flex items-center gap-1 text-[8px] font-bold text-rose-500 hover:text-rose-600 transition-all"
+                                              title="Delete all students in this class"
+                                            >
+                                              <Trash2 className="w-2.5 h-2.5" />
+                                              Delete
+                                            </button>
+                                          )}
+                                          {groupStudents.length === 0 && (
+                                            <span className="text-[8px] text-slate-300 italic">Empty</span>
                                           )}
                                         </div>
                                       </div>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`text-[8px] px-1 py-0.5 rounded-full border font-bold ${getStatusColor(p.status)}`}>
-                                          {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
-                                        </span>
-                                        {getTrendIcon(p.trend)}
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleDeleteStudent(p.student.id);
+                                      {isGroupExpanded && groupStudents.map((p) => (
+                                        <div
+                                          key={p.student.id}
+                                          onClick={() => setSelectedStudentId(p.student.id)}
+                                          className={`w-full cursor-pointer text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
+                                            selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
+                                          }`}
+                                          role="button"
+                                          tabIndex={0}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                              setSelectedStudentId(p.student.id);
+                                            }
                                           }}
-                                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
                                         >
-                                          <Trash2 className="w-3 h-3" />
-                                        </button>
-                                      </div>
+                                          <div className="flex items-center gap-2">
+                                            <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
+                                              selectedStudentId === p.student.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
+                                            }`}>
+                                              {(p.student.preferredName || p.student.name).split(' ').map((n: string) => n[0]).join('')}
+                                            </div>
+                                            <div className="min-w-0">
+                                              <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">
+                                                {p.student.preferredName || p.student.name}
+                                                {p.student.isNew && <span className="ml-1 text-[7px] text-amber-500 uppercase">New</span>}
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className={`text-[8px] px-1 py-0.5 rounded-full border font-bold ${getStatusColor(p.status)}`}>
+                                              {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
+                                            </span>
+                                            {getTrendIcon(p.trend)}
+                                            <button 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteStudent(p.student.id);
+                                              }}
+                                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
+                                            >
+                                              <Trash2 className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
                                     </div>
-                                  ))}
-                                </div>
-                              );
-                            })}
+                                  );
+                                })
+                              )
+                            )}
                           </div>
                         );
                       })
@@ -4061,6 +4189,18 @@ export default function App() {
                             ))}
                           </select>
                         </div>
+                        {(group.yearGroup === '12 IB' || group.yearGroup === '13 IB') && (
+                          <div className="flex gap-2 border-t border-slate-50 pt-2">
+                            <span className="text-[9px] bg-violet-50 text-violet-600 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
+                              <span className="w-1 h-1 rounded-full bg-violet-400"></span>
+                              HL: {students.filter(s => s.groupName === group.name && String(s.yearGroup) === String(group.yearGroup) && s.ibLevel === 'HL' && s.academicYear === selectedAcademicYear).length}
+                            </span>
+                            <span className="text-[9px] bg-sky-50 text-sky-600 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
+                              <span className="w-1 h-1 rounded-full bg-sky-400"></span>
+                              SL: {students.filter(s => s.groupName === group.name && String(s.yearGroup) === String(group.yearGroup) && s.ibLevel === 'SL' && s.academicYear === selectedAcademicYear).length}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ))}
                 </div>
@@ -4130,79 +4270,87 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="card w-full max-w-md p-6"
+              className="card w-full max-w-md flex flex-col max-h-[90vh] p-0 overflow-hidden"
             >
-              <h3 className="text-xl font-bold text-slate-900 mb-6">
-                {editingAssessmentId ? 'Edit Assessment' : 'Add New Assessment'}
-              </h3>
-              <form onSubmit={handleAddAssessment} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Year Group</label>
-                    <select 
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                      value={newAssessment.yearGroup}
-                      onChange={e => {
-                        const val = e.target.value;
-                        const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
-                        setNewAssessment({
-                          ...newAssessment, 
-                          yearGroup: year,
-                          subject: SUBJECTS_BY_YEAR[year][0]
-                        });
-                      }}
-                    >
-                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
-                        <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
-                      ))}
-                    </select>
+              <div className="p-6 border-b border-slate-100 flex-shrink-0 bg-white">
+                <h3 className="text-xl font-bold text-slate-900">
+                  {editingAssessmentId ? 'Edit Assessment' : 'Add New Assessment'}
+                </h3>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6 pt-4">
+                <form id="assessment-form" onSubmit={handleAddAssessment} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Year Group</label>
+                      <select 
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={newAssessment.yearGroup}
+                        onChange={e => {
+                          const val = e.target.value;
+                          const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
+                          setNewAssessment({
+                            ...newAssessment, 
+                            yearGroup: year,
+                            subject: SUBJECTS_BY_YEAR[year][0]
+                          });
+                        }}
+                      >
+                        {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
+                          <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Subject</label>
+                      <select 
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={newAssessment.subject}
+                        onChange={e => setNewAssessment({...newAssessment, subject: e.target.value})}
+                      >
+                        {SUBJECTS_BY_YEAR[newAssessment.yearGroup].map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Subject</label>
-                    <select 
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                      value={newAssessment.subject}
-                      onChange={e => setNewAssessment({...newAssessment, subject: e.target.value})}
-                    >
-                      {SUBJECTS_BY_YEAR[newAssessment.yearGroup].map(s => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Assessment Name</label>
-                  <input 
-                    required
-                    type="text" 
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={newAssessment.name}
-                    onChange={e => setNewAssessment({...newAssessment, name: e.target.value})}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Max Marks</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Assessment Name</label>
                     <input 
                       required
-                      type="number" 
+                      type="text" 
                       className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                      value={newAssessment.maxMarks}
-                      onChange={e => setNewAssessment({...newAssessment, maxMarks: parseInt(e.target.value)})}
+                      value={newAssessment.name}
+                      onChange={e => setNewAssessment({...newAssessment, name: e.target.value})}
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
-                    <input 
-                      required
-                      type="date" 
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                      value={newAssessment.date}
-                      onChange={e => setNewAssessment({...newAssessment, date: e.target.value})}
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Max Marks</label>
+                      <input 
+                        required
+                        type="number" 
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={newAssessment.maxMarks}
+                        onChange={e => setNewAssessment({...newAssessment, maxMarks: parseInt(e.target.value)})}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                      <input 
+                        required
+                        type="date" 
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={newAssessment.date}
+                        onChange={e => setNewAssessment({...newAssessment, date: e.target.value})}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="flex gap-3 pt-4">
+                </form>
+              </div>
+
+              <div className="p-6 border-t border-slate-100 flex-shrink-0 bg-white">
+                <div className="flex gap-3">
                   <button 
                     type="button" 
                     onClick={() => {
@@ -4214,11 +4362,11 @@ export default function App() {
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn-primary flex-1">
+                  <button form="assessment-form" type="submit" className="btn-primary flex-1">
                     {editingAssessmentId ? 'Update Assessment' : 'Add Assessment'}
                   </button>
                 </div>
-              </form>
+              </div>
             </motion.div>
           </div>
         )}
@@ -4229,201 +4377,208 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="card w-full max-w-md p-6"
+              className="card w-full max-w-md flex flex-col max-h-[90vh] p-0 overflow-hidden"
             >
-              <h3 className="text-xl font-bold text-slate-900 mb-6">{editingStudentId ? 'Edit Student' : 'Add New Student'}</h3>
-              <form onSubmit={handleAddStudent} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Student Name (Legal)</label>
-                  <input 
-                    required
-                    type="text" 
-                    placeholder="e.g. Sarah Ahmed"
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={newStudent.name}
-                    onChange={e => setNewStudent({...newStudent, name: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Preferred Name</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. Sarah"
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={newStudent.preferredName}
-                    onChange={e => setNewStudent({...newStudent, preferredName: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Year Group</label>
-                  <select 
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={newStudent.yearGroup}
-                    onChange={e => {
-                      const val = e.target.value;
-                      const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
-                      // Use String() comparison to avoid type mismatch, and fall back to student-derived groups
-                      const groupsForYear = Array.from(new Set([
-                        ...groups.filter(g => String(g.yearGroup) === String(year) && g.academicYear === selectedAcademicYear).map(g => g.name),
-                        ...students.filter(s => String(s.yearGroup) === String(year) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
-                      ])).sort();
-                      const firstGroup = groupsForYear[0] || '';
-                      setNewStudent({...newStudent, yearGroup: year, groupName: firstGroup});
-                    }}
-                  >
-                    {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
-                      <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Group / Class</label>
-                  {(() => {
-                    // Build groups list from both Firestore groups collection AND existing students
-                    // Uses String() comparison to handle number/string type mismatches
-                    const groupsForYear = Array.from(new Set([
-                      ...groups.filter(g => String(g.yearGroup) === String(newStudent.yearGroup) && g.academicYear === selectedAcademicYear).map(g => g.name),
-                      ...students.filter(s => String(s.yearGroup) === String(newStudent.yearGroup) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
-                    ])).sort();
-                    return (
-                      <select 
-                        required
-                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
-                        value={newStudent.groupName}
-                        onChange={e => setNewStudent({...newStudent, groupName: e.target.value})}
-                      >
-                        <option value="" disabled>Select Group</option>
-                        {groupsForYear.map(name => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                        {groupsForYear.length === 0 && (
-                          <option disabled>No groups found — import students first</option>
-                        )}
-                      </select>
-                    );
-                  })()}
-                </div>
-
-                {(newStudent.yearGroup === '12 IB' || newStudent.yearGroup === '13 IB') && (
+              <div className="p-6 border-b border-slate-100 flex-shrink-0 bg-white">
+                <h3 className="text-xl font-bold text-slate-900">{editingStudentId ? 'Edit Student' : 'Add New Student'}</h3>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6 pt-4">
+                <form id="student-form" onSubmit={handleAddStudent} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">IB Level (for filtering purposes)</label>
-                    <div className="flex gap-2">
-                      {(['HL', 'SL'] as const).map(level => (
-                        <button
-                          key={level}
-                          type="button"
-                          onClick={() => setNewStudent({ ...newStudent, ibLevel: newStudent.ibLevel === level ? undefined : level })}
-                          className={`flex-1 px-4 py-2 border rounded-xl font-bold transition-all ${
-                            newStudent.ibLevel === level 
-                              ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
-                              : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
-                          }`}
-                        >
-                          {level}
-                        </button>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Student Name (Legal)</label>
+                    <input 
+                      required
+                      type="text" 
+                      placeholder="e.g. Sarah Ahmed"
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                      value={newStudent.name}
+                      onChange={e => setNewStudent({...newStudent, name: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Preferred Name</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Sarah"
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                      value={newStudent.preferredName}
+                      onChange={e => setNewStudent({...newStudent, preferredName: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Year Group</label>
+                    <select 
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                      value={newStudent.yearGroup}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
+                        // Use String() comparison to avoid type mismatch, and fall back to student-derived groups
+                        const groupsForYear = Array.from(new Set([
+                          ...groups.filter(g => String(g.yearGroup) === String(year) && g.academicYear === selectedAcademicYear).map(g => g.name),
+                          ...students.filter(s => String(s.yearGroup) === String(year) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
+                        ])).sort();
+                        const firstGroup = groupsForYear[0] || '';
+                        setNewStudent({...newStudent, yearGroup: year, groupName: firstGroup});
+                      }}
+                    >
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
+                        <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                       ))}
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1">Is this student in an HL or SL class? (Optional)</p>
+                    </select>
                   </div>
-                )}
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Subjects</label>
-                  <div className="flex flex-wrap gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
-                    {(SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map(subject => {
-                      const currentSubjects: string[] = (newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || [];
-                      const isSelected = currentSubjects.includes(subject);
-                      return (
-                        <button
-                          key={subject}
-                          type="button"
-                          onClick={() => {
-                            const current: string[] = (newStudent as any).subjects || [...(SUBJECTS_BY_YEAR[newStudent.yearGroup] || [])];
-                            const updated = isSelected ? current.filter(s => s !== subject) : [...current, subject];
-                            setNewStudent({...newStudent, subjects: updated} as any);
-                          }}
-                          className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${
-                            isSelected 
-                              ? 'bg-indigo-600 text-white border-indigo-600' 
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
-                          }`}
-                        >
-                          {subject}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[10px] text-slate-400 mt-1">Click to toggle — all selected by default</p>
-                </div>
-                {/* HL/SL level selector — only for IB years */}
-                {(newStudent.yearGroup === '12 IB' || newStudent.yearGroup === '13 IB') && (
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Subject Levels (HL / SL)</label>
-                    <div className="space-y-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
-                      {((newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map((subject: string) => {
-                        const subjectLevels = (newStudent as any).subjectLevels || {};
-                        const currentLevel = subjectLevels[subject] || 'SL';
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Group / Class</label>
+                    {(() => {
+                      // Build groups list from both Firestore groups collection AND existing students
+                      // Uses String() comparison to handle number/string type mismatches
+                      const groupsForYear = Array.from(new Set([
+                        ...groups.filter(g => String(g.yearGroup) === String(newStudent.yearGroup) && g.academicYear === selectedAcademicYear).map(g => g.name),
+                        ...students.filter(s => String(s.yearGroup) === String(newStudent.yearGroup) && s.academicYear === selectedAcademicYear).map(s => s.groupName).filter(Boolean)
+                      ])).sort();
+                      return (
+                        <select 
+                          required
+                          className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                          value={newStudent.groupName}
+                          onChange={e => setNewStudent({...newStudent, groupName: e.target.value})}
+                        >
+                          <option value="" disabled>Select Group</option>
+                          {groupsForYear.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                          {groupsForYear.length === 0 && (
+                            <option disabled>No groups found — import students first</option>
+                          )}
+                        </select>
+                      );
+                    })()}
+                  </div>
+
+                  {(newStudent.yearGroup === '12 IB' || newStudent.yearGroup === '13 IB') && (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">IB Level (for filtering purposes)</label>
+                      <div className="flex gap-2">
+                        {(['HL', 'SL'] as const).map(level => (
+                          <button
+                            key={level}
+                            type="button"
+                            onClick={() => setNewStudent({ ...newStudent, ibLevel: newStudent.ibLevel === level ? undefined : level })}
+                            className={`flex-1 px-4 py-2 border rounded-xl font-bold transition-all ${
+                              newStudent.ibLevel === level 
+                                ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
+                                : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            {level}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">Is this student in an HL or SL class? (Optional)</p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Subjects</label>
+                    <div className="flex flex-wrap gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
+                      {(SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map(subject => {
+                        const currentSubjects: string[] = (newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || [];
+                        const isSelected = currentSubjects.includes(subject);
                         return (
-                          <div key={subject} className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-700" style={{ color: SUBJECT_COLORS[subject] }}>
-                              {subject}
-                            </span>
-                            <div className="flex gap-1">
-                              {(['HL', 'SL'] as const).map(level => (
-                                <button
-                                  key={level}
-                                  type="button"
-                                  onClick={() => {
-                                    const existing = (newStudent as any).subjectLevels || {};
-                                    setNewStudent({ ...newStudent, subjectLevels: { ...existing, [subject]: level } } as any);
-                                  }}
-                                  className={`px-3 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
-                                    currentLevel === level
-                                      ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
-                                      : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
-                                  }`}
-                                >
-                                  {level}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                          <button
+                            key={subject}
+                            type="button"
+                            onClick={() => {
+                              const current: string[] = (newStudent as any).subjects || [...(SUBJECTS_BY_YEAR[newStudent.yearGroup] || [])];
+                              const updated = isSelected ? current.filter(s => s !== subject) : [...current, subject];
+                              setNewStudent({...newStudent, subjects: updated} as any);
+                            }}
+                            className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${
+                              isSelected 
+                                ? 'bg-indigo-600 text-white border-indigo-600' 
+                                : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                            }`}
+                          >
+                            {subject}
+                          </button>
                         );
                       })}
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-1">Default is SL — click HL to change</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Click to toggle — all selected by default</p>
                   </div>
-                )}
-                <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
-                  <div className="flex items-center h-5">
-                    <input
-                      id="is-new-student"
-                      type="checkbox"
-                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
-                      checked={newStudent.isNew}
-                      onChange={e => setNewStudent({ ...newStudent, isNew: e.target.checked })}
+                  {/* HL/SL level selector — only for IB years */}
+                  {(newStudent.yearGroup === '12 IB' || newStudent.yearGroup === '13 IB') && (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Subject Levels (HL / SL)</label>
+                      <div className="space-y-2 p-3 border border-slate-200 rounded-xl bg-slate-50">
+                        {((newStudent as any).subjects || SUBJECTS_BY_YEAR[newStudent.yearGroup] || []).map((subject: string) => {
+                          const subjectLevels = (newStudent as any).subjectLevels || {};
+                          const currentLevel = subjectLevels[subject] || 'SL';
+                          return (
+                            <div key={subject} className="flex items-center justify-between">
+                              <span className="text-xs font-medium text-slate-700" style={{ color: SUBJECT_COLORS[subject] }}>
+                                {subject}
+                              </span>
+                              <div className="flex gap-1">
+                                {(['HL', 'SL'] as const).map(level => (
+                                  <button
+                                    key={level}
+                                    type="button"
+                                    onClick={() => {
+                                      const existing = (newStudent as any).subjectLevels || {};
+                                      setNewStudent({ ...newStudent, subjectLevels: { ...existing, [subject]: level } } as any);
+                                    }}
+                                    className={`px-3 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
+                                      currentLevel === level
+                                        ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
+                                        : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                                    }`}
+                                  >
+                                    {level}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">Default is SL — click HL to change</p>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                    <div className="flex items-center h-5">
+                      <input
+                        id="is-new-student"
+                        type="checkbox"
+                        className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
+                        checked={newStudent.isNew}
+                        onChange={e => setNewStudent({ ...newStudent, isNew: e.target.checked })}
+                      />
+                    </div>
+                    <div className="ml-0 text-sm">
+                      <label htmlFor="is-new-student" className="font-bold text-indigo-900 cursor-pointer">Mark as New Student</label>
+                      <p className="text-[10px] text-indigo-600/70 italic">Identify students who joined late and may have missed previous assessments.</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 pt-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <FileText className="w-3 h-3 text-indigo-400" />
+                      Teacher Notes / Details
+                    </label>
+                    <textarea
+                      value={newStudent.notes}
+                      onChange={e => setNewStudent({ ...newStudent, notes: e.target.value })}
+                      className="input-field min-h-[80px] py-2 text-xs leading-relaxed resize-none bg-slate-50 border-slate-200 focus:bg-white transition-colors"
+                      placeholder="Add details about the student (e.g., joins from different curriculum, specific needs, etc.)"
                     />
+                    <p className="text-[9px] text-slate-400 italic">These notes are only visible to teachers.</p>
                   </div>
-                  <div className="ml-0 text-sm">
-                    <label htmlFor="is-new-student" className="font-bold text-indigo-900 cursor-pointer">Mark as New Student</label>
-                    <p className="text-[10px] text-indigo-600/70 italic">Identify students who joined late and may have missed previous assessments.</p>
-                  </div>
-                </div>
+                </form>
+              </div>
 
-                <div className="space-y-1.5 pt-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <FileText className="w-3 h-3 text-indigo-400" />
-                    Teacher Notes / Details
-                  </label>
-                  <textarea
-                    value={newStudent.notes}
-                    onChange={e => setNewStudent({ ...newStudent, notes: e.target.value })}
-                    className="input-field min-h-[80px] py-2 text-xs leading-relaxed resize-none bg-slate-50 border-slate-200 focus:bg-white transition-colors"
-                    placeholder="Add details about the student (e.g., joins from different curriculum, specific needs, etc.)"
-                  />
-                  <p className="text-[9px] text-slate-400 italic">These notes are only visible to teachers.</p>
-                </div>
-
-                <div className="flex gap-3 pt-4">
+              <div className="p-6 border-t border-slate-100 flex-shrink-0 bg-white">
+                <div className="flex gap-3">
                   <button 
                     type="button" 
                     onClick={() => {
@@ -4435,11 +4590,11 @@ export default function App() {
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn-primary flex-1">
+                  <button form="student-form" type="submit" className="btn-primary flex-1">
                     {editingStudentId ? 'Save Changes' : 'Add Student'}
                   </button>
                 </div>
-              </form>
+              </div>
             </motion.div>
           </div>
         )}
@@ -4940,19 +5095,21 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="card w-full max-w-md p-6"
+              className="card w-full max-w-md flex flex-col max-h-[90vh] p-0 overflow-hidden"
             >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600">
-                  <Upload className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">Confirm Import</h3>
-                  <p className="text-sm text-slate-500">File: {pendingImport?.fileName}.csv</p>
+              <div className="p-6 border-b border-slate-100 flex-shrink-0 bg-white">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-900">Confirm Import</h3>
+                    <p className="text-sm text-slate-500">File: {pendingImport?.fileName}.csv</p>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Academic Year</label>
                   <select 
@@ -5048,107 +5205,109 @@ export default function App() {
                     onChange={e => setImportConfig({ ...importConfig, date: e.target.value })}
                   />
                 </div>
+
+                {/* Preview panel */}
+                {importPreview && (
+                  <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl space-y-3">
+                    <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide">Import Preview</p>
+                    <div className="grid grid-cols-2 gap-3 text-center">
+                      <div className="bg-white rounded-lg p-2 border border-indigo-100">
+                        <p className="text-lg font-bold text-indigo-600">{importPreview.students}</p>
+                        <p className="text-[10px] text-slate-500">Students</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2 border border-indigo-100">
+                        <p className="text-lg font-bold text-indigo-600">{importPreview.marks}</p>
+                        <p className="text-[10px] text-slate-500">Marks</p>
+                      </div>
+                    </div>
+                    {importPreview.groups && importPreview.groups.length > 0 && (
+                      <div className="bg-white rounded-lg p-2 border border-green-200">
+                        <p className="text-[10px] font-bold text-green-700 mb-1">GROUPS DETECTED</p>
+                        <div className="flex flex-wrap gap-1">
+                          {importPreview.groups.map(g => (
+                            <span key={g} className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-bold">{g}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {Object.keys(importColumnSubjects).length > 0 ? (
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-500 mb-1.5 uppercase tracking-wide">
+                          Assessments detected — assign a subject to each:
+                        </p>
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                          {Object.entries(importColumnSubjects).map(([col, subject]) => {
+                            // Parse name and maxMarks from column header for display
+                            const marksMatch = col.match(/\((\d+)\)/);
+                            const maxMarks = marksMatch ? parseInt(marksMatch[1]) : importConfig.maxMarks;
+                            let displayName = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
+                            // Strip subject suffix if auto-detected
+                            const dashMatch = displayName.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+                            if (dashMatch) displayName = dashMatch[1].trim();
+                            return (
+                              <div key={col} className="flex items-center gap-2 bg-white rounded-lg px-2 py-1.5 border border-indigo-100">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[11px] font-bold text-slate-800 truncate">{displayName}</p>
+                                  <p className="text-[9px] text-slate-400">{maxMarks} marks</p>
+                                </div>
+                                <select
+                                  className={`text-[10px] font-bold border rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400 ${
+                                    !subject ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                  }`}
+                                  value={subject}
+                                  onChange={e => setImportColumnSubjects(prev => ({ ...prev, [col]: e.target.value }))}
+                                >
+                                  <option value="">— pick subject —</option>
+                                  {SUBJECTS_BY_YEAR[importConfig.yearGroup].map(s => (
+                                    <option key={s} value={s}>{s}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {Object.values(importColumnSubjects).some(s => !s) && (
+                          <p className="text-[10px] text-amber-600 mt-1.5 font-medium">
+                            ⚠ Assign a subject to every assessment before importing.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-amber-600 bg-amber-50 px-3 py-2 rounded-lg border border-amber-100">
+                        ⚠ No assessment columns detected. Check column headers include max marks e.g. "Test 1 (50)".
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* Preview panel */}
-              {importPreview && (
-                <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl space-y-3">
-                  <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide">Import Preview</p>
-                  <div className="grid grid-cols-2 gap-3 text-center">
-                    <div className="bg-white rounded-lg p-2 border border-indigo-100">
-                      <p className="text-lg font-bold text-indigo-600">{importPreview.students}</p>
-                      <p className="text-[10px] text-slate-500">Students</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-2 border border-indigo-100">
-                      <p className="text-lg font-bold text-indigo-600">{importPreview.marks}</p>
-                      <p className="text-[10px] text-slate-500">Marks</p>
-                    </div>
-                  </div>
-                  {importPreview.groups && importPreview.groups.length > 0 && (
-                    <div className="bg-white rounded-lg p-2 border border-green-200">
-                      <p className="text-[10px] font-bold text-green-700 mb-1">GROUPS DETECTED</p>
-                      <div className="flex flex-wrap gap-1">
-                        {importPreview.groups.map(g => (
-                          <span key={g} className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-bold">{g}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {Object.keys(importColumnSubjects).length > 0 ? (
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-500 mb-1.5 uppercase tracking-wide">
-                        Assessments detected — assign a subject to each:
-                      </p>
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {Object.entries(importColumnSubjects).map(([col, subject]) => {
-                          // Parse name and maxMarks from column header for display
-                          const marksMatch = col.match(/\((\d+)\)/);
-                          const maxMarks = marksMatch ? parseInt(marksMatch[1]) : importConfig.maxMarks;
-                          let displayName = marksMatch ? col.replace(marksMatch[0], '').trim() : col;
-                          // Strip subject suffix if auto-detected
-                          const dashMatch = displayName.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-                          if (dashMatch) displayName = dashMatch[1].trim();
-                          return (
-                            <div key={col} className="flex items-center gap-2 bg-white rounded-lg px-2 py-1.5 border border-indigo-100">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[11px] font-bold text-slate-800 truncate">{displayName}</p>
-                                <p className="text-[9px] text-slate-400">{maxMarks} marks</p>
-                              </div>
-                              <select
-                                className={`text-[10px] font-bold border rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400 ${
-                                  !subject ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                                }`}
-                                value={subject}
-                                onChange={e => setImportColumnSubjects(prev => ({ ...prev, [col]: e.target.value }))}
-                              >
-                                <option value="">— pick subject —</option>
-                                {SUBJECTS_BY_YEAR[importConfig.yearGroup].map(s => (
-                                  <option key={s} value={s}>{s}</option>
-                                ))}
-                              </select>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {Object.values(importColumnSubjects).some(s => !s) && (
-                        <p className="text-[10px] text-amber-600 mt-1.5 font-medium">
-                          ⚠ Assign a subject to every assessment before importing.
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-amber-600 bg-amber-50 px-3 py-2 rounded-lg border border-amber-100">
-                      ⚠ No assessment columns detected. Check column headers include max marks e.g. "Test 1 (50)".
-                    </div>
-                  )}
+              <div className="p-6 border-t border-slate-100 flex-shrink-0 bg-white">
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => { setShowImportModal(false); setPendingImport(null); setImportPreview(null); }}
+                    className="btn-secondary flex-1"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={previewImport}
+                    className="btn-secondary flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                  >
+                    Preview
+                  </button>
+                  <button 
+                    onClick={() => { confirmImport(); setImportPreview(null); setImportColumnSubjects({}); }}
+                    className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={
+                      !importPreview ||
+                      Object.keys(importColumnSubjects).length === 0 ||
+                      Object.values(importColumnSubjects).some(s => !s)
+                    }
+                  >
+                    Import
+                  </button>
                 </div>
-              )}
-
-              <div className="flex gap-3 mt-6">
-                <button 
-                  onClick={() => { setShowImportModal(false); setPendingImport(null); setImportPreview(null); }}
-                  className="btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={previewImport}
-                  className="btn-secondary flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
-                >
-                  Preview
-                </button>
-                <button 
-                  onClick={() => { confirmImport(); setImportPreview(null); setImportColumnSubjects({}); }}
-                  className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                  disabled={
-                    !importPreview ||
-                    Object.keys(importColumnSubjects).length === 0 ||
-                    Object.values(importColumnSubjects).some(s => !s)
-                  }
-                >
-                  Import
-                </button>
               </div>
             </motion.div>
           </div>
