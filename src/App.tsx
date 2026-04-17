@@ -17,6 +17,7 @@ import {
   Filter,
   X,
   FileText,
+  List,
   Loader2,
   CheckCircle2,
   AlertCircle
@@ -196,7 +197,9 @@ export default function App() {
     yearGroup: YearGroup;
     groupName: string;
     ibLevel?: 'HL' | 'SL';
-  }>({ name: '', preferredName: '', yearGroup: 7 as YearGroup, groupName: '' });
+    isNew: boolean;
+    notes: string;
+  }>({ name: '', preferredName: '', yearGroup: 7 as YearGroup, groupName: '', isNew: false, notes: '' });
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [ibLevelFilter, setIbLevelFilter] = useState<'all' | 'HL' | 'SL'>('all');
@@ -611,6 +614,14 @@ export default function App() {
       .sort((a, b) => a.averagePercentage - b.averagePercentage)
       .slice(0, 5);
   }, [performanceTabStats]);
+
+  const performanceTabAssessments = useMemo(() => {
+    return assessments
+      .filter(a => a.academicYear === selectedAcademicYear)
+      .filter(a => matchesYearFilter(a.yearGroup, yearFilter))
+      .filter(a => performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [assessments, selectedAcademicYear, yearFilter, performanceSubjectFilter]);
 
   const performanceInsights = useMemo(() => {
     if (performanceTabStats.length === 0) return null;
@@ -1652,7 +1663,7 @@ export default function App() {
       'studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname',
       'surname', 'lastname', 'forename', 'firstname',
       'yeargroup', 'year', 'groupname', 'group', 'class',
-      'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
+      'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark', 'isnew', 'newstudent', 'latejoined',
       'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname', '__empty'
     ].map(h => normalizeKey(h));
 
@@ -1683,6 +1694,10 @@ export default function App() {
       if (!studentNameRaw) return;
       const studentName = String(studentNameRaw).trim();
       const preferredName = findValue(row, ['preferredname', 'preferred name', 'nickname']) || '';
+      const isNewRaw = findValue(row, ['isnew', 'newstudent', 'new', 'latejoined']);
+      const isNew = isNewRaw !== undefined ? (String(isNewRaw).toLowerCase() === 'true' || String(isNewRaw).toLowerCase() === 'yes' || isNewRaw === 1 || String(isNewRaw).toLowerCase() === 'y') : false;
+      const notesRaw = findValue(row, ['notes', 'comments', 'details', 'studentdetails']);
+      const studentNotes = notesRaw ? String(notesRaw).trim() : '';
 
       const rowSheetName = row.__sheetName || defaultSheetName;
 
@@ -1757,7 +1772,9 @@ export default function App() {
           preferredName: String(preferredName).trim(),
           yearGroup: effectiveYearGroup,
           groupName: effectiveGroupName,
-          academicYear: selectedAcademicYear
+          academicYear: selectedAcademicYear,
+          isNew: isNew,
+          notes: studentNotes
         } as any;
         newStudents.push(student);
       } else {
@@ -1766,6 +1783,12 @@ export default function App() {
         }
         if (preferredName) {
           student.preferredName = String(preferredName).trim();
+        }
+        if (isNewRaw !== undefined) {
+          student.isNew = isNew;
+        }
+        if (studentNotes) {
+          student.notes = studentNotes;
         }
       }
 
@@ -2106,7 +2129,7 @@ export default function App() {
     }
     
     setShowStudentModal(false);
-    setNewStudent(prev => ({ ...prev, name: '', preferredName: '', ibLevel: undefined })); // Keep yearGroup and groupName
+    setNewStudent(prev => ({ ...prev, name: '', preferredName: '', ibLevel: undefined, isNew: false, notes: '', subjects: undefined, subjectLevels: undefined } as any)); // Keep yearGroup and groupName
   };
 
   const handleAddGrade = (isAssessment: boolean = false, assessmentId?: string) => {
@@ -2129,43 +2152,54 @@ export default function App() {
   };
 
   const handleMarkAbsent = (studentId: string, assessmentId: string, absent: boolean) => {
-    setMarks(prev => {
-      const existingIdx = prev.findIndex(m => m.studentId === studentId && m.assessmentId === assessmentId);
-      if (absent) {
-        // Create/update mark as absent (score stored as 0 but excluded from averages)
-        if (existingIdx !== -1) {
-          return prev.map((m, i) => i === existingIdx ? { ...m, absent: true, score: 0 } : m);
-        }
-        return [...prev, { id: Math.random().toString(36).substr(2, 9), studentId, assessmentId, score: 0, absent: true } as any];
+    const existingMark = marks.find(m => m.studentId === studentId && m.assessmentId === assessmentId);
+    
+    if (absent) {
+      const newScore = 0;
+      if (existingMark) {
+        setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, absent: true, score: newScore } : m));
       } else {
-        // Remove absent flag — mark becomes "not yet entered" if score was 0
-        if (existingIdx !== -1) {
-          const updated = { ...prev[existingIdx] };
-          delete (updated as any).absent;
-          return prev.map((m, i) => i === existingIdx ? updated : m);
-        }
-        return prev;
+        setMarks(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), studentId, assessmentId, score: newScore, absent: true } as any]);
       }
-    });
+    } else {
+      if (existingMark) {
+        if (existingMark.score === 0) {
+          fbDeleteMark(existingMark.id);
+          setMarks(prev => prev.filter(m => m.id !== existingMark.id));
+        } else {
+          const updated = { ...existingMark };
+          delete (updated as any).absent;
+          setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+        }
+      }
+    }
   };
 
   const handleUpdateMark = (studentId: string, assessmentId: string, score: number | null) => {
-    if (score === null) {
-      setMarks(prev => prev.filter(m => !(m.studentId === studentId && m.assessmentId === assessmentId)));
+    const existingMark = marks.find(m => m.studentId === studentId && m.assessmentId === assessmentId);
+    
+    if (score === null || isNaN(score)) {
+      if (existingMark) {
+        fbDeleteMark(existingMark.id);
+        setMarks(prev => prev.filter(m => m.id !== existingMark.id));
+      }
       return;
     }
+
     const assessment = assessments.find(a => a.id === assessmentId);
     const maxMarks = assessment?.maxMarks || 100;
     const validatedScore = Math.min(maxMarks, Math.max(0, score));
-    setMarks(prev => {
-      const filtered = prev.filter(m => !(m.studentId === studentId && m.assessmentId === assessmentId));
-      return [...filtered, { 
+    
+    if (existingMark) {
+      setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, score: validatedScore } : m));
+    } else {
+      setMarks(prev => [...prev, { 
         id: Math.random().toString(36).substr(2, 9),
         studentId, 
         assessmentId, 
         score: validatedScore 
-      }];
-    });
+      }]);
+    }
   };
 
   const getGrade = (percentage: number, boundaries: GradeBoundary[]) => {
@@ -2962,6 +2996,100 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+
+                  <div className="card p-6 overflow-hidden">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <List className="w-5 h-5 text-indigo-500" />
+                        Class Marksheet Overview
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{filteredPerformances.length} Students — {performanceTabAssessments.length} Assessments</span>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto border rounded-xl">
+                      <table className="w-full text-left border-collapse min-w-[800px]">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest sticky left-0 bg-slate-50 z-20 border-r border-slate-200 min-w-[150px]">Student Name</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200">Avg %</th>
+                            {performanceTabAssessments.map(a => (
+                              <th key={a.id} className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center min-w-[100px] border-r border-slate-200 last:border-r-0">
+                                <div className="flex flex-col items-center">
+                                  <span className="truncate max-w-[90px]" title={a.name}>{a.name}</span>
+                                  <span className="text-[8px] text-indigo-500 font-bold">max: {a.maxMarks}</span>
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredPerformances.length > 0 ? filteredPerformances.map(p => {
+                            return (
+                              <tr key={p.student.id} className={`${p.student.isNew ? 'bg-amber-50/50' : ''} hover:bg-indigo-50/30 transition-colors group`}>
+                                <td className={`py-2.5 px-4 sticky left-0 ${p.student.isNew ? 'bg-amber-50/90' : 'bg-white'} group-hover:bg-indigo-50/30 z-10 border-r border-slate-200 shadow-[1px_0_3px_rgba(0,0,0,0.05)]`}>
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${p.status === 'excellent' ? 'bg-emerald-500' : p.status === 'on-track' ? 'bg-indigo-400' : 'bg-rose-400'}`}></div>
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-bold text-slate-900 truncate">{p.student.name}</span>
+                                      {p.student.isNew && (
+                                        <span className="text-[7px] font-black text-amber-600 uppercase tracking-tighter leading-none">Joined Late</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-2 text-center border-r border-slate-200">
+                                  <span className={`text-xs font-bold leading-none py-1 px-2 rounded-lg ${
+                                    p.averagePercentage >= 80 ? 'bg-emerald-50 text-emerald-700' : 
+                                    p.averagePercentage >= 50 ? 'bg-indigo-50 text-indigo-700' : 
+                                    'bg-rose-50 text-rose-700'
+                                  }`}>
+                                    {p.averagePercentage.toFixed(1)}%
+                                  </span>
+                                </td>
+                                {performanceTabAssessments.map(a => {
+                                  const mark = p.marks.find(m => m.assessmentId === a.id);
+                                  if (!mark) {
+                                    return (
+                                      <td key={a.id} className="py-2.5 px-2 text-center border-r border-slate-100 last:border-r-0 italic text-slate-300 text-[10px]">
+                                        —
+                                      </td>
+                                    );
+                                  }
+                                  
+                                  const percentage = (mark.score / a.maxMarks) * 100;
+                                  const isAbsent = (mark as any).absent;
+                                  
+                                  return (
+                                    <td key={a.id} className="py-2.5 px-2 text-center border-r border-slate-100 last:border-r-0">
+                                      {isAbsent ? (
+                                        <span className="text-[9px] font-bold text-rose-500 px-1.5 py-0.5 bg-rose-50 rounded">ABS</span>
+                                      ) : (
+                                        <div className="flex flex-col">
+                                          <span className="text-xs font-bold text-slate-800">{mark.score}</span>
+                                          <span className={`text-[9px] font-medium ${
+                                            percentage >= 80 ? 'text-emerald-500' : 
+                                            percentage >= 40 ? 'text-slate-400' : 
+                                            'text-rose-500'
+                                          }`}>{percentage.toFixed(0)}%</span>
+                                        </div>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          }) : (
+                            <tr>
+                              <td colSpan={performanceTabAssessments.length + 2} className="py-12 text-center bg-white">
+                                <p className="text-sm text-slate-400 italic">No students found matching current filters.</p>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -3138,6 +3266,11 @@ export default function App() {
                                         <div className="min-w-0">
                                           <p className="font-bold text-slate-900 text-[11px] truncate max-w-[100px]">
                                             {p.student.preferredName || p.student.name}
+                                            {p.student.isNew && (
+                                              <span className="ml-1.5 px-1 py-0.5 rounded text-[7px] font-black bg-amber-100 text-amber-600 border border-amber-200 uppercase tracking-tighter">
+                                                New
+                                              </span>
+                                            )}
                                             {p.student.ibLevel && (
                                               <span className={`ml-1.5 px-1 py-0.5 rounded text-[8px] font-bold ${
                                                 p.student.ibLevel === 'HL' ? 'bg-violet-100 text-violet-600 border border-violet-200' : 'bg-sky-100 text-sky-600 border border-sky-200'
@@ -3203,6 +3336,11 @@ export default function App() {
                                     {p.student.ibLevel} Level
                                   </span>
                                 )}
+                                {p.student.isNew && (
+                                  <span className="ml-3 px-2 py-0.5 rounded-lg text-sm font-bold align-middle bg-amber-100 text-amber-700 border border-amber-200">
+                                    New Admission
+                                  </span>
+                                )}
                                 {p.student.preferredName && p.student.preferredName !== p.student.name && (
                                   <span className="ml-3 text-lg text-slate-400 font-medium">({p.student.name})</span>
                                 )}
@@ -3216,8 +3354,12 @@ export default function App() {
                                       preferredName: p.student.preferredName || '',
                                       yearGroup: p.student.yearGroup,
                                       groupName: p.student.groupName,
-                                      ibLevel: p.student.ibLevel
-                                    });
+                                      ibLevel: p.student.ibLevel,
+                                      isNew: !!p.student.isNew,
+                                      notes: p.student.notes || '',
+                                      ...((p.student as any).subjects && { subjects: (p.student as any).subjects }),
+                                      ...((p.student as any).subjectLevels && { subjectLevels: (p.student as any).subjectLevels })
+                                    } as any);
                                     setShowStudentModal(true);
                                   }}
                                   className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
@@ -3263,6 +3405,18 @@ export default function App() {
                               )}
                             </div>
                           </div>
+
+                          {p.student.notes && (
+                            <div className={`mb-6 p-4 rounded-xl border ${p.student.isNew ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                              <h4 className={`text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5 ${p.student.isNew ? 'text-amber-700' : 'text-slate-500'}`}>
+                                <FileText className="w-3 h-3" />
+                                Teacher Notes
+                              </h4>
+                              <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap italic">
+                                "{p.student.notes}"
+                              </p>
+                            </div>
+                          )}
 
                           <div className="h-[250px] mb-8">
                             <ResponsiveContainer width="100%" height="100%">
@@ -4113,6 +4267,36 @@ export default function App() {
                     <p className="text-[10px] text-slate-400 mt-1">Default is SL — click HL to change</p>
                   </div>
                 )}
+                <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                  <div className="flex items-center h-5">
+                    <input
+                      id="is-new-student"
+                      type="checkbox"
+                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
+                      checked={newStudent.isNew}
+                      onChange={e => setNewStudent({ ...newStudent, isNew: e.target.checked })}
+                    />
+                  </div>
+                  <div className="ml-0 text-sm">
+                    <label htmlFor="is-new-student" className="font-bold text-indigo-900 cursor-pointer">Mark as New Student</label>
+                    <p className="text-[10px] text-indigo-600/70 italic">Identify students who joined late and may have missed previous assessments.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-3 h-3 text-indigo-400" />
+                    Teacher Notes / Details
+                  </label>
+                  <textarea
+                    value={newStudent.notes}
+                    onChange={e => setNewStudent({ ...newStudent, notes: e.target.value })}
+                    className="input-field min-h-[80px] py-2 text-xs leading-relaxed resize-none bg-slate-50 border-slate-200 focus:bg-white transition-colors"
+                    placeholder="Add details about the student (e.g., joins from different curriculum, specific needs, etc.)"
+                  />
+                  <p className="text-[9px] text-slate-400 italic">These notes are only visible to teachers.</p>
+                </div>
+
                 <div className="flex gap-3 pt-4">
                   <button 
                     type="button" 
