@@ -38,13 +38,12 @@ import {
 } from 'recharts';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenAI, Type } from "@google/genai";
 import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries, deleteStudent as fbDeleteStudent, deleteAssessment as fbDeleteAssessment, deleteMark as fbDeleteMark, deleteGroup as fbDeleteGroup } from './services/firebaseService';
 import { db } from './firebase';
 import { setDoc, doc, deleteDoc, updateDoc, getDoc } from 'firebase/firestore';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 import { 
   Student, 
   Assessment, 
@@ -55,6 +54,8 @@ import {
   Group,
   Question
 } from './types';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 const SUBJECTS_BY_YEAR: Record<YearGroup, string[]> = {
   7: ['Computer Science'],
@@ -310,6 +311,16 @@ export default function App() {
       }
     };
     fetchData();
+
+    // Fallback: ensure app loads even if data fetch hangs
+    const fallbackTimer = setTimeout(() => {
+      setIsInitialLoading(prev => {
+        if (prev) console.warn("Data fetch timed out, showing app with local/empty state.");
+        return false;
+      });
+    }, 5000);
+
+    return () => clearTimeout(fallbackTimer);
   }, []);
 
   // Save data when state changes
@@ -2182,14 +2193,10 @@ export default function App() {
   if (isInitialLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center"
-        >
+        <div className="text-center">
           <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-slate-600 font-medium">Loading tracker...</p>
-        </motion.div>
+        </div>
       </div>
     );
   }
