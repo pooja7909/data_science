@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "A student in the department.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "preferredName": { "type": "string" },
+        "yearGroup": { "type": "string" },
+        "groupName": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "ibLevel": { "type": "string", "enum": ["HL", "SL"] }
+      },
+      "required": ["id", "name", "yearGroup", "groupName", "academicYear"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "A class group.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "yearGroup": { "type": "string" },
+        "name": { "type": "string" },
+        "academicYear": { "type": "string" }
+      },
+      "required": ["id", "yearGroup", "name", "academicYear"]
+    },
+    "Assessment": {
+      "title": "Assessment",
+      "description": "An assessment definition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "subject": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "maxMarks": { "type": "number" },
+        "yearGroup": { "type": "string" },
+        "academicYear": { "type": "string" }
+      },
+      "required": ["id", "name", "subject", "date", "maxMarks", "yearGroup", "academicYear"]
+    },
+    "Mark": {
+      "title": "Mark",
+      "description": "A mark for a student in an assessment.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "assessmentId": { "type": "string" },
+        "score": { "type": "number" }
+      },
+      "required": ["id", "studentId", "assessmentId", "score"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": { "$ref": "Student" },
+      "description": "Students."
+    },
+    "/groups/{groupId}": {
+      "schema": { "$ref": "Group" },
+      "description": "Groups."
+    },
+    "/assessments/{assessmentId}": {
+      "schema": { "$ref": "Assessment" },
+      "description": "Assessments."
+    },
+    "/marks/{markId}": {
+      "schema": { "$ref": "Mark" },
+      "description": "Marks."
+    }
+  }
+}
