@@ -8,6 +8,8 @@ export interface Student {
   groupName: string;
   academicYear: string;
   ibLevel?: 'HL' | 'SL';
+  isNew?: boolean;
+  notes?: string;
 }
 
 export interface Group {
