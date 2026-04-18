@@ -2993,9 +2993,20 @@ export default function App() {
                               <p className="text-[10px] text-slate-500">{p.student.groupName}</p>
                             </div>
                           </div>
-                          <span className="text-xs font-bold text-emerald-600 bg-white px-2 py-0.5 rounded-full border border-emerald-100">
-                            {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
-                          </span>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="text-xs font-bold text-emerald-600 bg-white px-2 py-0.5 rounded-full border border-emerald-100">
+                              {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
+                            </span>
+                            {(p as any).hasData && (
+                              <span className="text-[10px] font-black text-slate-800 tracking-tighter">
+                                {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
+                                  String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
+                                  String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
+                                  KS3_BOUNDARIES
+                                ))}
+                              </span>
+                            )}
+                          </div>
                         </button>
                       )) : (
                         <p className="text-xs text-slate-400 italic text-center py-4">No data available</p>
@@ -3024,9 +3035,20 @@ export default function App() {
                               <p className="text-[10px] text-slate-500">{p.student.groupName}</p>
                             </div>
                           </div>
-                          <span className="text-xs font-bold text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-100">
-                            {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
-                          </span>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="text-xs font-bold text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-100">
+                              {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
+                            </span>
+                            {(p as any).hasData && (
+                              <span className="text-[10px] font-black text-slate-800 tracking-tighter">
+                                {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
+                                  String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
+                                  String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
+                                  KS3_BOUNDARIES
+                                ))}
+                              </span>
+                            )}
+                          </div>
                         </button>
                       )) : (
                         <p className="text-xs text-slate-400 italic text-center py-4">No data available</p>
@@ -3273,6 +3295,9 @@ export default function App() {
                                 {marksheetSort.key === 'avg' && (marksheetSort.direction === 'asc' ? '↑' : '↓')}
                               </div>
                             </th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200">
+                              Avg Grade
+                            </th>
                             {performanceTabAssessments.map(a => (
                               <th key={a.id} className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center min-w-[100px] border-r border-slate-200 last:border-r-0">
                                 <div className="flex flex-col items-center">
@@ -3289,7 +3314,12 @@ export default function App() {
                               <tr key={p.student.id} className={`${p.student.isNew ? 'bg-amber-50/50' : ''} hover:bg-indigo-50/30 transition-colors group`}>
                                 <td className={`py-2.5 px-4 sticky left-0 ${p.student.isNew ? 'bg-amber-50/90' : 'bg-white'} group-hover:bg-indigo-50/30 z-10 border-r border-slate-200 shadow-[1px_0_3px_rgba(0,0,0,0.05)]`}>
                                   <div className="flex items-center gap-2">
-                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${p.status === 'excellent' ? 'bg-emerald-500' : p.status === 'on-track' ? 'bg-indigo-400' : 'bg-rose-400'}`}></div>
+                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                      p.status === 'excellent' ? 'bg-emerald-500' : 
+                                      p.status === 'on-track' ? 'bg-indigo-400' : 
+                                      p.status === 'needs-improvement' ? 'bg-rose-400' :
+                                      'bg-slate-300'
+                                    }`}></div>
                                     <div className="flex flex-col">
                                       <span className="text-xs font-bold text-slate-900 truncate">{p.student.name}</span>
                                       {p.student.isNew && (
@@ -3299,13 +3329,34 @@ export default function App() {
                                   </div>
                                 </td>
                                 <td className="py-2.5 px-2 text-center border-r border-slate-200">
-                                  <span className={`text-xs font-bold leading-none py-1 px-2 rounded-lg ${
-                                    p.averagePercentage >= 80 ? 'bg-emerald-50 text-emerald-700' : 
-                                    p.averagePercentage >= 50 ? 'bg-indigo-50 text-indigo-700' : 
-                                    'bg-rose-50 text-rose-700'
-                                  }`}>
-                                    {p.averagePercentage.toFixed(1)}%
-                                  </span>
+                                  {(p as any).hasData ? (
+                                    <span className={`text-xs font-bold leading-none py-1 px-2 rounded-lg ${
+                                      p.averagePercentage >= 80 ? 'bg-emerald-50 text-emerald-700' : 
+                                      p.averagePercentage >= 50 ? 'bg-indigo-50 text-indigo-700' : 
+                                      'bg-rose-50 text-rose-700'
+                                    }`}>
+                                      {p.averagePercentage.toFixed(1)}%
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] italic text-slate-300">—</span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-2 text-center border-r border-slate-200">
+                                  {(p as any).hasData ? (
+                                    <span className={`text-xs font-black px-2 py-1 rounded-lg ${
+                                      p.status === 'excellent' ? 'bg-emerald-100 text-emerald-700' :
+                                      p.status === 'needs-improvement' ? 'bg-rose-100 text-rose-700' :
+                                      'bg-indigo-100 text-indigo-700'
+                                    }`}>
+                                      {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
+                                        String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
+                                        String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
+                                        KS3_BOUNDARIES
+                                      ))}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] italic text-slate-300">—</span>
+                                  )}
                                 </td>
                                 {performanceTabAssessments.map(a => {
                                   const mark = p.marks.find(m => m.assessmentId === a.id);
@@ -3547,9 +3598,20 @@ export default function App() {
                                                   </div>
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
-                                                  <span className={`text-[8px] px-1 py-0.5 rounded-full border ${getStatusColor(p.status)}`}>
-                                                    {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
-                                                  </span>
+                                                  <div className="flex flex-col items-end">
+                                                    <span className={`text-[8px] font-bold px-1 rounded-sm border ${getStatusColor(p.status)}`}>
+                                                      {(p as any).hasData ? `${p.averagePercentage.toFixed(0)}%` : '—'}
+                                                    </span>
+                                                    {(p as any).hasData && (
+                                                      <span className="text-[9px] font-black text-slate-700 mt-0.5">
+                                                        {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
+                                                          String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
+                                                          String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
+                                                          KS3_BOUNDARIES
+                                                        ))}
+                                                      </span>
+                                                    )}
+                                                  </div>
                                                   <button 
                                                     onClick={(e) => {
                                                       e.stopPropagation();
