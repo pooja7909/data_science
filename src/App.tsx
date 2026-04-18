@@ -46,8 +46,20 @@ import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenAI, Type } from "@google/genai";
 import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries, deleteStudent as fbDeleteStudent, deleteAssessment as fbDeleteAssessment, deleteMark as fbDeleteMark, deleteGroup as fbDeleteGroup } from './services/firebaseService';
-import { db } from './firebase';
-import { setDoc, doc, deleteDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { auth, db } from './firebase';
+import { 
+  setDoc, 
+  doc, 
+  deleteDoc, 
+  updateDoc, 
+  getDoc, 
+  onSnapshot, 
+  collection, 
+  query, 
+  where 
+} from 'firebase/firestore';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { Lock, ShieldCheck, KeyRound, Eye, EyeOff } from 'lucide-react';
 
 import { 
   Student, 
@@ -204,6 +216,68 @@ export default function App() {
     isNew: boolean;
     notes: string;
   }>({ name: '', preferredName: '', yearGroup: 7 as YearGroup, groupName: '', isNew: false, notes: '' });
+
+  // Security State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return localStorage.getItem('app_authenticated') === 'true';
+  });
+  const [enteredPin, setEnteredPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
+  const [pinError, setPinError] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isSystemLoading, setIsSystemLoading] = useState(true);
+  const [globalPin, setGlobalPin] = useState<string | null>(null);
+
+  // Authentication useEffect
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        try {
+          await signInAnonymously(auth);
+        } catch (err) {
+          console.error("Auth failed:", err);
+        }
+      }
+    });
+
+    // Fetch Global PIN from Config
+    const fetchConfig = async () => {
+      try {
+        const configDoc = await getDoc(doc(db, 'config', 'security'));
+        if (configDoc.exists()) {
+          setGlobalPin(configDoc.data().accessPin || '1234');
+        } else {
+          // Initialize default PIN if it doesn't exist
+          await setDoc(doc(db, 'config', 'security'), { accessPin: '1234' });
+          setGlobalPin('1234');
+        }
+      } catch (err) {
+        console.error("Config fetch failed:", err);
+      } finally {
+        setIsSystemLoading(false);
+      }
+    };
+
+    fetchConfig();
+    return () => unsub();
+  }, []);
+
+  const handleVerifyPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsVerifying(true);
+    setPinError(false);
+    
+    // Simulate slight delay for security feel
+    setTimeout(() => {
+      if (enteredPin === globalPin) {
+        setIsAuthenticated(true);
+        localStorage.setItem('app_authenticated', 'true');
+      } else {
+        setPinError(true);
+      }
+      setIsVerifying(false);
+    }, 400);
+  };
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [ibLevelFilter, setIbLevelFilter] = useState<'all' | 'HL' | 'SL'>('all');
@@ -2465,13 +2539,97 @@ export default function App() {
     }
   };
 
-  if (isInitialLoading) {
+  if (isSystemLoading || isInitialLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-600 font-medium">Loading tracker...</p>
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+          <p className="text-sm font-medium text-slate-500">Initializing secure session...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200"
+        >
+          <div className="bg-indigo-600 p-8 text-center text-white relative">
+            <div className="absolute top-4 right-4 text-indigo-200 opacity-20">
+              <ShieldCheck className="w-24 h-24" />
+            </div>
+            <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/20">
+              <Lock className="w-8 h-8 text-white" />
+            </div>
+            <h2 className="text-2xl font-bold mb-2">Secure Access</h2>
+            <p className="text-indigo-100 text-sm">Please enter the shared PIN to access the CS Data Tracker</p>
+          </div>
+          
+          <div className="p-8">
+            <form onSubmit={handleVerifyPin} className="space-y-6">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Access PIN</label>
+                <div className="relative">
+                  <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <input
+                    type={showPin ? "text" : "password"}
+                    value={enteredPin}
+                    onChange={(e) => setEnteredPin(e.target.value)}
+                    placeholder="Enter PIN"
+                    className={`w-full bg-slate-50 border-2 rounded-2xl py-4 pl-12 pr-12 text-lg font-bold tracking-[0.5em] transition-all outline-none ${
+                      pinError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-100 focus:border-indigo-500'
+                    }`}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                  >
+                    {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+                <AnimatePresence>
+                  {pinError && (
+                    <motion.p 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="text-rose-500 text-xs font-bold mt-2 flex items-center gap-1"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5" /> Invalid PIN. Please check and try again.
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isVerifying || !enteredPin}
+                className="w-full btn-primary py-4 rounded-2xl text-lg flex items-center justify-center gap-2 group"
+              >
+                {isVerifying ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : (
+                  <>
+                    Unlock Tracker
+                    <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+          
+          <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+              Secured with Firebase Authentication
+            </p>
+          </div>
+        </motion.div>
       </div>
     );
   }
@@ -4325,10 +4483,70 @@ export default function App() {
               <div className="pt-8 border-t border-slate-100">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h2 className="text-2xl font-bold text-slate-900 mb-2">Academic Year Transition</h2>
-                    <p className="text-slate-500">Promote all students and groups to the next academic year. This will create new records for the next year without deleting any existing data.</p>
+                    <h2 className="text-2xl font-bold text-slate-900 mb-2">Security Settings</h2>
+                    <p className="text-slate-500">Update the shared PIN required for application access. Share this PIN with anyone you want to allow into the tracker.</p>
                   </div>
                 </div>
+                
+                <div className="card p-6 border-amber-100 bg-amber-50/30">
+                  <div className="flex flex-col md:flex-row md:items-center gap-6">
+                    <div className="flex-1">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Shared Access PIN</label>
+                      <div className="relative max-w-xs">
+                        <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input
+                          type={showPin ? "text" : "password"}
+                          value={globalPin || ''}
+                          onChange={(e) => setGlobalPin(e.target.value)}
+                          placeholder="Enter new PIN"
+                          className="w-full bg-white border border-slate-200 rounded-xl py-2 pl-10 pr-10 font-bold transition-all outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPin(!showPin)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-indigo-600"
+                        >
+                          {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-amber-600 font-medium mt-2">
+                        Note: Changing this will require everyone to use the new PIN on their next session.
+                      </p>
+                    </div>
+                    <button 
+                      onClick={async () => {
+                        setSaveStatus('saving');
+                        try {
+                          await setDoc(doc(db, 'config', 'security'), { accessPin: globalPin || '1234' });
+                          setSaveStatus('saved');
+                        } catch (err) {
+                          console.error("PIN update failed:", err);
+                          setSaveStatus('idle');
+                          alert("Failed to update security settings. Check your permissions.");
+                        }
+                        setTimeout(() => setSaveStatus('idle'), 3000);
+                      }}
+                      className="btn-primary"
+                    >
+                      Update Security PIN
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <button 
+                    onClick={() => {
+                      localStorage.removeItem('app_authenticated');
+                      window.location.reload();
+                    }}
+                    className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-rose-500 transition-colors flex items-center gap-1"
+                  >
+                    <Lock className="w-3 h-3" /> Log Out (Lock App)
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-8 border-t border-slate-100">
                 <div className="card p-6 bg-indigo-50 border-indigo-100">
                   <div className="flex items-center justify-between gap-6">
                     <div className="flex-1">
