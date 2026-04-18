@@ -208,6 +208,7 @@ export default function App() {
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [ibLevelFilter, setIbLevelFilter] = useState<'all' | 'HL' | 'SL'>('all');
   const [modalGroupFilter, setModalGroupFilter] = useState<string>('all');
+  const [marksLevelFilter, setMarksLevelFilter] = useState<'all' | 'HL' | 'SL'>('all');
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
   const [showPaperGradingModal, setShowPaperGradingModal] = useState<string | null>(null);
   const [extractionMode, setExtractionMode] = useState<'questions' | 'subparts'>('questions');
@@ -263,7 +264,10 @@ export default function App() {
 
   // Reset modal filters when modals are closed
   useEffect(() => {
-    if (!showMarksModal) setMarksGroupFilter('all');
+    if (!showMarksModal) {
+      setMarksGroupFilter('all');
+      setMarksLevelFilter('all');
+    }
   }, [showMarksModal]);
 
   useEffect(() => {
@@ -398,19 +402,19 @@ export default function App() {
           console.log("Saving data to Firebase...");
           // Save all students, assessments, marks, groups, and year boundaries to Firebase
           await Promise.all([
-            ...students.map(s => setDoc(doc(db, 'students', s.id), {
+            ...students.map(s => setDoc(doc(db, 'students', s.id), cleanFirestoreData({
               ...s,
               yearGroup: migrateYear(s.yearGroup)
-            })),
-            ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), {
+            }))),
+            ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), cleanFirestoreData({
               ...a,
               yearGroup: migrateYear(a.yearGroup)
-            })),
-            ...marks.map(m => setDoc(doc(db, 'marks', m.id), m)),
-            ...groups.map(g => setDoc(doc(db, 'groups', g.id), {
+            }))),
+            ...marks.map(m => setDoc(doc(db, 'marks', m.id), cleanFirestoreData(m))),
+            ...groups.map(g => setDoc(doc(db, 'groups', g.id), cleanFirestoreData({
               ...g,
               yearGroup: migrateYear(g.yearGroup)
-            })),
+            }))),
             updateYearBoundaries(yearBoundaries)
           ]);
           console.log("Data saved successfully.");
@@ -443,6 +447,13 @@ export default function App() {
     }
   }, [yearFilter]);
 
+  // Reset IB Level filter if not an IB year
+  useEffect(() => {
+    if (!(String(yearFilter).includes('IB') || yearFilter === 'IB_ALL')) {
+      setIbLevelFilter('all');
+    }
+  }, [yearFilter]);
+
   // Helper for year group display
   const formatYearGroup = (y: YearGroup) => {
     return typeof y === 'number' ? `Year ${y}` : y;
@@ -458,6 +469,20 @@ export default function App() {
     if (y === '8') return 8;
     if (y === '9') return 9;
     return y as YearGroup;
+  };
+
+  const cleanFirestoreData = (data: any) => {
+    const clean: any = {};
+    Object.keys(data).forEach(key => {
+      if (data[key] !== undefined) {
+        if (data[key] !== null && typeof data[key] === 'object' && !Array.isArray(data[key])) {
+          clean[key] = cleanFirestoreData(data[key]);
+        } else {
+          clean[key] = data[key];
+        }
+      }
+    });
+    return clean;
   };
 
   // Helper for year group matching
@@ -578,9 +603,25 @@ export default function App() {
         const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
         const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
         const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
-        const warningBoundary = sortedBoundaries.length > 1 ? sortedBoundaries[sortedBoundaries.length - 2].minPercentage : 40;
-        if (averagePercentage >= topBoundary) status = 'excellent';
-        else if (averagePercentage < warningBoundary) status = 'needs-improvement';
+        
+        // Define "Fail Range" thresholds based on year group
+        let supportThreshold = 50; // Default (KS3 "At" boundary)
+        if (String(student.yearGroup).includes('IB')) {
+          // Trigger support if below Grade 5 (i.e., at 4 or lower)
+          supportThreshold = sortedBoundaries.find(b => b.grade === '5')?.minPercentage || 70;
+        } else if (String(student.yearGroup).includes('IGCSE')) {
+          // Trigger support if below Grade 5 (i.e., at 4 or lower)
+          supportThreshold = sortedBoundaries.find(b => b.grade === '5')?.minPercentage || 50;
+        } else {
+          // KS3: Trigger support if below "At" grade
+          supportThreshold = sortedBoundaries.find(b => b.grade === 'At')?.minPercentage || 50;
+        }
+
+        if (averagePercentage >= topBoundary) {
+          status = 'excellent';
+        } else if (trend === 'declining' && averagePercentage < supportThreshold) {
+          status = 'needs-improvement';
+        }
       }
 
       return {
@@ -654,10 +695,13 @@ export default function App() {
 
   const availableGroups = useMemo(() => {
     const currentYearStudents = students.filter(s => s.academicYear === selectedAcademicYear);
-    const filteredByYear = currentYearStudents.filter(s => matchesYearFilter(s.yearGroup, yearFilter));
+    let filtered = currentYearStudents.filter(s => matchesYearFilter(s.yearGroup, yearFilter));
+    if (ibLevelFilter !== 'all') {
+      filtered = filtered.filter(s => s.ibLevel === ibLevelFilter);
+    }
     // Only show groups that actually have students - prevents ghost/deleted groups from appearing
-    return Array.from(new Set(filteredByYear.map(s => s.groupName))).filter(Boolean).sort();
-  }, [students, selectedAcademicYear, yearFilter]);
+    return Array.from(new Set(filtered.map(s => s.groupName))).filter(Boolean).sort();
+  }, [students, selectedAcademicYear, yearFilter, ibLevelFilter]);
 
   const topPerformers = useMemo(() => {
     return [...filteredPerformances]
@@ -668,7 +712,7 @@ export default function App() {
 
   const needsSupport = useMemo(() => {
     return [...filteredPerformances]
-      .filter(p => (p as any).hasData)
+      .filter(p => p.hasData && p.status === 'needs-improvement')
       .sort((a, b) => a.averagePercentage - b.averagePercentage)
       .slice(0, 5);
   }, [filteredPerformances]);
@@ -693,15 +737,107 @@ export default function App() {
       const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
       const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : 0;
 
+      // Trend: only from assessments the student sat, need at least 2
+      let trend: 'improving' | 'declining' | 'stable' = 'stable';
+      if (sittingMarks.length >= 2) {
+        const last = (sittingMarks[sittingMarks.length - 1].score / sittingMarks[sittingMarks.length - 1].assessment.maxMarks) * 100;
+        const prev = (sittingMarks[sittingMarks.length - 2].score / sittingMarks[sittingMarks.length - 2].assessment.maxMarks) * 100;
+        if (last > prev + 2) trend = 'improving';
+        else if (last < prev - 2) trend = 'declining';
+      }
+
+      // Status logic
+      let status: 'excellent' | 'on-track' | 'needs-improvement' | 'no-data' = sittingMarks.length === 0 ? 'no-data' : 'on-track';
+      if (sittingMarks.length > 0) {
+        const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
+        const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
+        const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
+        
+        // Define "Fail Range" thresholds based on year group
+        let supportThreshold = 50; // Default (KS3 "At" boundary)
+        if (String(student.yearGroup).includes('IB')) {
+          supportThreshold = sortedBoundaries.find(b => b.grade === '5')?.minPercentage || 70;
+        } else if (String(student.yearGroup).includes('IGCSE')) {
+          supportThreshold = sortedBoundaries.find(b => b.grade === '5')?.minPercentage || 50;
+        } else {
+          supportThreshold = sortedBoundaries.find(b => b.grade === 'At')?.minPercentage || 50;
+        }
+
+        if (averagePercentage >= topBoundary) {
+          status = 'excellent';
+        } else if (trend === 'declining' && averagePercentage < supportThreshold) {
+          status = 'needs-improvement';
+        }
+      }
+
       return {
         student,
         averagePercentage,
+        trend,
+        status,
         count: sittingMarks.length,         // only assessments actually sat
         totalCount: allStudentMarks.length,  // includes absent
         absentCount: allStudentMarks.length - sittingMarks.length
       };
     }).filter(p => p.count > 0); // exclude students with no real marks at all
-  }, [students, assessments, marks, performanceSubjectFilter, yearFilter, selectedAcademicYear]);
+  }, [students, assessments, marks, performanceSubjectFilter, yearFilter, selectedAcademicYear, yearBoundaries]);
+
+  const calculateGradeDistribution = (stats: any[], yearFilterScope: string) => {
+    // Determine which year group to use for boundaries
+    let currentYearGroup: YearGroup = 7;
+    if (yearFilterScope !== 'all' && yearFilterScope !== 'IGCSE_ALL' && yearFilterScope !== 'IB_ALL') {
+      currentYearGroup = yearFilterScope as YearGroup;
+    } else if (stats.length > 0) {
+      currentYearGroup = stats[0].student?.yearGroup || stats[0].student.yearGroup || 7;
+    }
+
+    const currentBoundaries = yearBoundaries[currentYearGroup] || (
+      String(currentYearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
+      String(currentYearGroup).includes('IB') ? IB_BOUNDARIES : KS3_BOUNDARIES
+    );
+    const sorted = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
+
+    const data = sorted.map((boundary, idx) => {
+      const exclusiveCount = stats.filter(p => {
+        const score = p.averagePercentage;
+        const hasAnyData = p.hasData !== undefined ? p.hasData : (p.count > 0);
+        if (!hasAnyData) return false;
+        
+        const isMin = score >= boundary.minPercentage;
+        const isMax = idx === 0 ? true : score < sorted[idx - 1].minPercentage;
+        return isMin && isMax;
+      }).length;
+
+      let color = 'bg-blue-500';
+      if (idx === 0) color = 'bg-emerald-500';
+      else if (idx === sorted.length - 1) color = 'bg-rose-500';
+      else if (idx === sorted.length - 2) color = 'bg-orange-500';
+
+      return {
+        label: `${boundary.grade} (${boundary.minPercentage}%+)`,
+        count: exclusiveCount,
+        color
+      };
+    });
+
+    const noDataCount = stats.filter(p => {
+       const hasAnyData = p.hasData !== undefined ? p.hasData : (p.count > 0);
+       return !hasAnyData;
+    }).length;
+    
+    if (noDataCount > 0) {
+      data.push({ label: 'New / No Data', count: noDataCount, color: 'bg-slate-300' });
+    }
+    return data;
+  };
+
+  const gradeDistribution = useMemo(() => {
+    return calculateGradeDistribution(filteredPerformances, yearFilter);
+  }, [filteredPerformances, yearFilter, yearBoundaries]);
+
+  const performanceTabGradeDistribution = useMemo(() => {
+    return calculateGradeDistribution(performanceTabStats, yearFilter);
+  }, [performanceTabStats, yearFilter, yearBoundaries]);
 
   const topPerformersList = useMemo(() => {
     return [...performanceTabStats]
@@ -711,6 +847,7 @@ export default function App() {
 
   const needsSupportList = useMemo(() => {
     return [...performanceTabStats]
+      .filter(p => p.status === 'needs-improvement')
       .sort((a, b) => a.averagePercentage - b.averagePercentage)
       .slice(0, 5);
   }, [performanceTabStats]);
@@ -2440,6 +2577,20 @@ export default function App() {
                 ))}
               </select>
             </div>
+            {(String(yearFilter).includes('IB') || yearFilter === 'IB_ALL') && (
+              <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">IB Level</span>
+                <select 
+                  className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
+                  value={ibLevelFilter}
+                  onChange={(e) => setIbLevelFilter(e.target.value as any)}
+                >
+                  <option value="all">Both HL/SL</option>
+                  <option value="HL">HL Only</option>
+                  <option value="SL">SL Only</option>
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Subject</span>
               <select 
@@ -2710,14 +2861,12 @@ export default function App() {
                 </div>
 
                 <div className="card p-6">
-                  <h3 className="text-lg font-bold text-slate-900 mb-6">Performance Distribution</h3>
+                  <h3 className="text-lg font-bold text-slate-900 mb-6 font-display tracking-tight flex items-center justify-between">
+                    Performance Distribution
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 py-1 bg-slate-50 rounded-lg">Based on {yearFilter === 'all' ? 'All Years' : yearFilter} Settings</span>
+                  </h3>
                   <div className="space-y-6">
-                    {[
-                      { label: 'Excellent (80%+)', count: filteredPerformances.filter(p => p.status === 'excellent').length, color: 'bg-emerald-500' },
-                      { label: 'On Track (50-80%)', count: filteredPerformances.filter(p => p.status === 'on-track').length, color: 'bg-blue-500' },
-                      { label: 'Needs Improvement (<50%)', count: filteredPerformances.filter(p => p.status === 'needs-improvement').length, color: 'bg-rose-500' },
-                      { label: 'New / No Data', count: filteredPerformances.filter(p => (p as any).status === 'no-data').length, color: 'bg-slate-300' },
-                    ].map((item) => (
+                    {gradeDistribution.map((item) => (
                       <div key={item.label}>
                         <div className="flex justify-between text-sm mb-2">
                           <span className="font-medium text-slate-700">{item.label}</span>
@@ -2891,13 +3040,7 @@ export default function App() {
                       Grade Distribution
                     </h3>
                     <div className="space-y-4">
-                      {[
-                        { label: 'A*/A', count: performanceTabStats.filter(p => p.averagePercentage >= 80).length, color: 'bg-emerald-500' },
-                        { label: 'B/C', count: performanceTabStats.filter(p => p.averagePercentage >= 60 && p.averagePercentage < 80).length, color: 'bg-blue-500' },
-                        { label: 'D/E', count: performanceTabStats.filter(p => p.averagePercentage >= 40 && p.averagePercentage < 60).length, color: 'bg-amber-500' },
-                        { label: 'U', count: performanceTabStats.filter(p => p.averagePercentage < 40).length, color: 'bg-rose-500' },
-                        { label: 'No data', count: students.filter(s => s.academicYear === selectedAcademicYear && !performanceTabStats.find(p => p.student.id === s.id)).length, color: 'bg-slate-200' },
-                      ].map((item) => (
+                      {performanceTabGradeDistribution.map((item) => (
                         <div key={item.label}>
                           <div className="flex justify-between text-[10px] mb-1.5">
                             <span className="font-bold text-slate-600 uppercase tracking-tighter">{item.label}</span>
@@ -3755,7 +3898,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {assessments
-                  .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter) && (performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter))
+                  .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter) && (performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter) && (ibLevelFilter === 'all' || !a.ibLevel || a.ibLevel === ibLevelFilter))
                   .map(assessment => (
                   <div key={assessment.id} className="card p-6 hover:border-indigo-200 transition-colors group">
                     <div className="flex justify-between items-start mb-4">
@@ -3772,6 +3915,13 @@ export default function App() {
                         <h3 className="text-lg font-bold text-slate-900">{assessment.name}</h3>
                         <p className="text-sm text-slate-500">
                           {formatYearGroup(assessment.yearGroup)} • {assessment.date}
+                          {assessment.ibLevel && (
+                             <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                               assessment.ibLevel === 'HL' ? 'bg-violet-100 text-violet-600' : 'bg-sky-100 text-sky-600'
+                             }`}>
+                               {assessment.ibLevel}
+                             </span>
+                          )}
                         </p>
                       </div>
                       <div className="flex items-center gap-1">
@@ -4314,6 +4464,29 @@ export default function App() {
                       </select>
                     </div>
                   </div>
+                  {/* IB Level for Assessment */}
+                  {(newAssessment.yearGroup === '12 IB' || newAssessment.yearGroup === '13 IB') && (
+                    <div className="pb-4 border-b border-slate-100">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Scope / Level</label>
+                      <div className="flex gap-2">
+                        {(['all', 'HL', 'SL'] as const).map(level => (
+                          <button
+                            key={level}
+                            type="button"
+                            onClick={() => setNewAssessment({ ...newAssessment, ibLevel: level === 'all' ? undefined : level as any })}
+                            className={`flex-1 px-4 py-2 border rounded-xl font-bold transition-all ${
+                              (level === 'all' && !newAssessment.ibLevel) || (newAssessment.ibLevel === level)
+                                ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
+                                : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            {level === 'all' ? 'All (Both)' : level}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-2">Is this assessment for a specific level or shared by both?</p>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Assessment Name</label>
                     <input 
@@ -4625,29 +4798,55 @@ export default function App() {
                     <h4 className="font-bold text-slate-900 flex items-center gap-2">
                       <Users className="w-4 h-4" /> Student Marks
                     </h4>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 uppercase font-bold">Filter Group:</span>
-                      <select 
-                        className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
-                        value={marksGroupFilter}
-                        onChange={(e) => setMarksGroupFilter(e.target.value)}
-                      >
-                        <option value="all">All Groups</option>
-                        {(() => {
-                          const assessment = assessments.find(a => a.id === showMarksModal);
-                          // Only show groups that actually have students (prevents ghost groups)
-                          const fromStudents = students
-                            .filter(s => assessment 
-                              ? (String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === selectedAcademicYear)
-                              : s.academicYear === selectedAcademicYear)
-                            .map(s => s.groupName)
-                            .filter(Boolean);
-                          const allGroups = Array.from(new Set(fromStudents)).sort();
-                          return allGroups.map(name => (
-                            <option key={name} value={name}>{name}</option>
-                          ));
-                        })()}
-                      </select>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Group:</span>
+                        <select 
+                          className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                          value={marksGroupFilter}
+                          onChange={(e) => setMarksGroupFilter(e.target.value)}
+                        >
+                          <option value="all">All Groups</option>
+                          {(() => {
+                            const assessment = assessments.find(a => a.id === showMarksModal);
+                            // Only show groups that actually have students (prevents ghost groups)
+                            const fromStudents = students
+                              .filter(s => assessment 
+                                ? (String(s.yearGroup) === String(assessment.yearGroup) && s.academicYear === selectedAcademicYear)
+                                : s.academicYear === selectedAcademicYear)
+                              .map(s => s.groupName)
+                              .filter(Boolean);
+                            const allGroups = Array.from(new Set(fromStudents)).sort();
+                            return allGroups.map(name => (
+                              <option key={name} value={name}>{name}</option>
+                            ));
+                          })()}
+                        </select>
+                      </div>
+                      {(() => {
+                        const assessment = assessments.find(a => a.id === showMarksModal);
+                        if (!assessment || !(String(assessment.yearGroup).includes('IB'))) return null;
+                        return (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold">Level:</span>
+                            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                              {(['all', 'HL', 'SL'] as const).map(l => (
+                                <button
+                                  key={l}
+                                  onClick={() => setMarksLevelFilter(l)}
+                                  className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase transition-all ${
+                                    marksLevelFilter === l 
+                                      ? 'bg-white text-indigo-600 shadow-sm' 
+                                      : 'text-slate-400 hover:text-slate-600'
+                                  }`}
+                                >
+                                  {l}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto pr-2">
@@ -4657,7 +4856,8 @@ export default function App() {
                         const matchesYear = assessment ? String(s.yearGroup) === String(assessment.yearGroup) : true;
                         const matchesAcademicYear = s.academicYear === selectedAcademicYear;
                         const matchesGroup = marksGroupFilter === 'all' || s.groupName === marksGroupFilter;
-                        return matchesYear && matchesAcademicYear && matchesGroup;
+                        const matchesLevel = marksLevelFilter === 'all' || s.ibLevel === marksLevelFilter;
+                        return matchesYear && matchesAcademicYear && matchesGroup && matchesLevel;
                       });
                       const groupNames = Array.from(new Set(relevantStudents.map(s => s.groupName))).sort();
 
@@ -5315,7 +5515,7 @@ export default function App() {
       </AnimatePresence>
       <footer className="bg-white border-t border-slate-200 py-6 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-sm text-slate-500">© {new Date().getFullYear()} Pooja Arora</p>
+          <p className="text-sm text-slate-500">© {new Date().getFullYear()} Pooja Arora. All rights reserved.</p>
         </div>
       </footer>
     </div>
