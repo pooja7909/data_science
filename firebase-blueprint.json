@@ -71,6 +71,14 @@
     "/marks/{markId}": {
       "schema": { "$ref": "Mark" },
       "description": "Marks."
+    },
+    "/config/{configId}": {
+      "schema": "object",
+      "description": "System configuration and security settings."
+    },
+    "/yearBoundaries/{boundaryId}": {
+      "schema": "object",
+      "description": "Custom grading boundaries."
     }
   }
 }
