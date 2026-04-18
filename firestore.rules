@@ -1,50 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Global Deny
-    // ===============================================================
     match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // ===============================================================
-    // Shared Access Logic
-    // ===============================================================
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // ===============================================================
-    // Collection Matches
-    // ===============================================================
-    
-    match /students/{studentId} {
-      allow read, write: if isSignedIn() && isValidId(studentId);
-    }
-
-    match /groups/{groupId} {
-      allow read, write: if isSignedIn() && isValidId(groupId);
-    }
-
-    match /assessments/{assessmentId} {
-      allow read, write: if isSignedIn() && isValidId(assessmentId);
-    }
-
-    match /marks/{markId} {
-      allow read, write: if isSignedIn() && isValidId(markId);
-    }
-
-    match /config/{configId} {
-      allow read, write: if isSignedIn() && isValidId(configId);
-    }
-
-    match /yearBoundaries/{boundaryId} {
-      allow read, write: if isSignedIn() && isValidId(boundaryId);
+      allow read, write: if true;
     }
   }
 }
