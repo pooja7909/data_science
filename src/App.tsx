@@ -1010,8 +1010,19 @@ export default function App() {
         const sitting = ((p as any).sittingMarks || p.marks.filter((m: any) => !m.absent));
         if (sitting.length < 2) return { id: p.student.id, improvement: 0 };
         
-        const lastPerc = (sitting[sitting.length - 1].score / sitting[sitting.length - 1].assessment.maxMarks) * 100;
-        const firstPerc = (sitting[0].score / sitting[0].assessment.maxMarks) * 100;
+        const getMarkPerc = (m: any) => {
+          const a = m.assessment;
+          if (!a) return 0;
+          const p = (m.score / a.maxMarks) * 100;
+          if (m.resitScore !== undefined && m.resitScore !== null) {
+            const rp = (m.resitScore / (m.resitMaxMarks || a.maxMarks)) * 100;
+            return (p + rp) / 2;
+          }
+          return p;
+        };
+
+        const lastPerc = getMarkPerc(sitting[sitting.length - 1]);
+        const firstPerc = getMarkPerc(sitting[0]);
 
         const last = performanceDisplayMode === 'percentage' 
           ? lastPerc
@@ -1077,18 +1088,23 @@ export default function App() {
       .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
       .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime())
       .map(m => {
-        const perc = (m.score / m.assessment.maxMarks) * 100;
+        const effPerc = (m.score / m.assessment.maxMarks) * 100;
+        const resitPerc = (m.resitScore !== undefined && m.resitScore !== null) 
+          ? (m.resitScore / (m.resitMaxMarks || m.assessment.maxMarks)) * 100 
+          : null;
+        const finalPerc = resitPerc !== null ? (effPerc + resitPerc) / 2 : effPerc;
+
         const boundaries = student ? getStudentBoundaries(student) : [];
         const score = performanceDisplayMode === 'percentage' 
-          ? perc
-          : gradeToPoints(getGrade(perc, boundaries));
+          ? finalPerc
+          : gradeToPoints(getGrade(finalPerc, boundaries));
 
         return {
           date: new Date(m.assessment.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
           score,
           assessmentName: m.assessment.name,
           subject: m.assessment.subject,
-          grade: getGrade(perc, boundaries)
+          grade: getGrade(finalPerc, boundaries)
         };
       });
   }, [selectedStudentForPerformance, marks, assessments, performanceSubjectFilter, yearFilter, performanceDisplayMode, students, yearBoundaries]);
@@ -1103,15 +1119,24 @@ export default function App() {
       const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id && !(m as any).absent);
       let avg = 0;
       if (assessmentMarks.length > 0) {
+        const getMarkPerc = (m: Mark) => {
+          const p = (m.score / assessment.maxMarks) * 100;
+          if (m.resitScore !== undefined && m.resitScore !== null) {
+            const rp = (m.resitScore / (m.resitMaxMarks || assessment.maxMarks)) * 100;
+            return (p + rp) / 2;
+          }
+          return p;
+        };
+
         if (performanceDisplayMode === 'percentage') {
-          avg = assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / assessmentMarks.length;
+          avg = assessmentMarks.reduce((acc, m) => acc + getMarkPerc(m), 0) / assessmentMarks.length;
         } else {
           // Calculate points average
           const points = assessmentMarks.map(m => {
             const student = students.find(s => s.id === m.studentId);
-            const perc = (m.score / assessment.maxMarks) * 100;
+            const finalPerc = getMarkPerc(m);
             const boundaries = student ? getStudentBoundaries(student) : [];
-            return gradeToPoints(getGrade(perc, boundaries));
+            return gradeToPoints(getGrade(finalPerc, boundaries));
           });
           avg = points.reduce((a, b) => a + b, 0) / points.length;
         }
@@ -1158,18 +1183,26 @@ export default function App() {
       });
       let avg = 0;
       if (subjectMarks.length > 0) {
+        const getMarkPerc = (m: Mark) => {
+          const a = currentYearAssessments.find(as => as.id === m.assessmentId)!;
+          const p = (m.score / a.maxMarks) * 100;
+          if (m.resitScore !== undefined && m.resitScore !== null) {
+            const rp = (m.resitScore / (m.resitMaxMarks || a.maxMarks)) * 100;
+            return (p + rp) / 2;
+          }
+          return p;
+        };
+
         if (performanceDisplayMode === 'percentage') {
           avg = subjectMarks.reduce((acc, m) => {
-            const a = currentYearAssessments.find(as => as.id === m.assessmentId)!;
-            return acc + (m.score / a.maxMarks) * 100;
+            return acc + getMarkPerc(m);
           }, 0) / subjectMarks.length;
         } else {
           const points = subjectMarks.map(m => {
             const student = students.find(s => s.id === m.studentId);
-            const a = currentYearAssessments.find(as => as.id === m.assessmentId)!;
-            const perc = (m.score / a.maxMarks) * 100;
+            const finalPerc = getMarkPerc(m);
             const boundaries = student ? getStudentBoundaries(student) : [];
-            return gradeToPoints(getGrade(perc, boundaries));
+            return gradeToPoints(getGrade(finalPerc, boundaries));
           });
           avg = points.reduce((a, b) => a + b, 0) / points.length;
         }
@@ -3650,8 +3683,18 @@ export default function App() {
                                     );
                                   }
                                   
-                                  const percentage = (mark.score / a.maxMarks) * 100;
                                   const isAbsent = (mark as any).absent;
+                                  
+                                  const getMarkPerc = (m: Mark) => {
+                                    const p = (m.score / a.maxMarks) * 100;
+                                    if (m.resitScore !== undefined && m.resitScore !== null) {
+                                      const rp = (m.resitScore / (m.resitMaxMarks || a.maxMarks)) * 100;
+                                      return (p + rp) / 2;
+                                    }
+                                    return p;
+                                  };
+
+                                  const percentage = getMarkPerc(mark);
                                   
                                   return (
                                     <td key={a.id} className="py-2.5 px-2 text-center border-r border-slate-100 last:border-r-0">
@@ -3659,7 +3702,12 @@ export default function App() {
                                         <span className="text-[9px] font-bold text-rose-500 px-1.5 py-0.5 bg-rose-50 rounded">ABS</span>
                                       ) : (
                                         <div className="flex flex-col">
-                                          <span className="text-xs font-bold text-slate-800">{mark.score}</span>
+                                          <div className="flex items-center justify-center gap-1">
+                                            <span className="text-xs font-bold text-slate-800">{mark.score}</span>
+                                            {mark.resitScore !== undefined && mark.resitScore !== null && (
+                                              <span className="text-[10px] text-indigo-500 font-bold" title={`Resit: ${mark.resitScore}/${mark.resitMaxMarks || a.maxMarks}`}>®</span>
+                                            )}
+                                          </div>
                                           <span className={`text-[9px] font-medium ${
                                             percentage >= 80 ? 'text-emerald-500' : 
                                             percentage >= 40 ? 'text-slate-400' : 
@@ -4101,10 +4149,15 @@ export default function App() {
 
                           <div className="h-[250px] mb-8">
                             <ResponsiveContainer width="100%" height="100%">
-                              <AreaChart data={(performanceSubjectFilter === 'all' ? p.marks : p.marks.filter(m => m.assessment.subject === performanceSubjectFilter)).map(m => ({
-                                name: m.assessment.name,
-                                score: (m.score / m.assessment.maxMarks) * 100
-                              }))}>
+                              <AreaChart data={(performanceSubjectFilter === 'all' ? p.marks : p.marks.filter(m => m.assessment.subject === performanceSubjectFilter)).map(m => {
+                                const basePerc = (m.score / m.assessment.maxMarks) * 100;
+                                const resitPerc = (m.resitScore !== undefined && m.resitScore !== null) ? (m.resitScore / (m.resitMaxMarks || m.assessment.maxMarks) * 100) : null;
+                                const finalPerc = resitPerc !== null ? (basePerc + resitPerc) / 2 : basePerc;
+                                return {
+                                  name: m.assessment.name,
+                                  score: finalPerc
+                                };
+                              })}>
                                 <defs>
                                   <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
@@ -4135,16 +4188,33 @@ export default function App() {
                               </thead>
                               <tbody className="divide-y divide-slate-50">
                                 {(performanceSubjectFilter === 'all' ? p.marks : p.marks.filter(m => m.assessment.subject === performanceSubjectFilter)).map((m, idx) => {
-                                  const percentage = (m.score / m.assessment.maxMarks) * 100;
+                                  const basePerc = (m.score / m.assessment.maxMarks) * 100;
+                                  const resitPerc = (m.resitScore !== undefined && m.resitScore !== null) ? (m.resitScore / (m.resitMaxMarks || m.assessment.maxMarks) * 100) : null;
+                                  const percentage = resitPerc !== null ? (basePerc + resitPerc) / 2 : basePerc;
+                                  
                                   const currentBoundaries = m.assessment.boundaries || yearBoundaries[p.student.yearGroup] || [];
                                   const grade = getGrade(percentage, currentBoundaries);
                                   
                                   return (
                                     <tr key={idx} className="group hover:bg-slate-50/50 transition-colors">
-                                      <td className="py-3 px-2 font-medium text-slate-900">{m.assessment.name}</td>
+                                      <td className="py-3 px-2 font-medium text-slate-900">
+                                        {m.assessment.name}
+                                        {resitPerc !== null && (
+                                          <div className="text-[8px] text-indigo-500 font-bold uppercase mt-0.5">Resit Taken</div>
+                                        )}
+                                      </td>
                                       <td className="py-3 px-2 text-slate-600">{m.assessment.subject}</td>
                                       <td className="py-3 px-2 text-slate-500">{m.assessment.date}</td>
-                                      <td className="py-3 px-2 text-slate-900 font-mono">{m.score}/{m.assessment.maxMarks}</td>
+                                      <td className="py-3 px-2 text-slate-900 font-mono">
+                                        {resitPerc !== null ? (
+                                          <div className="flex flex-col">
+                                            <span>{m.score}/{m.assessment.maxMarks}</span>
+                                            <span className="text-[10px] text-slate-400 italic">Resit: {m.resitScore}/{m.resitMaxMarks || m.assessment.maxMarks}</span>
+                                          </div>
+                                        ) : (
+                                          `${m.score}/${m.assessment.maxMarks}`
+                                        )}
+                                      </td>
                                       <td className="py-3 px-2 text-right">
                                         <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg font-bold text-xs ${
                                           percentage >= 80 ? 'bg-emerald-100 text-emerald-700' : 
