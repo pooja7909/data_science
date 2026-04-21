@@ -675,7 +675,8 @@ export default function App() {
       const getEffectivePerc = (m: Mark & { assessment: Assessment }) => {
         const perc = (m.score / m.assessment.maxMarks) * 100;
         if (m.resitScore !== undefined && m.resitScore !== null) {
-          const resitPerc = (m.resitScore / m.assessment.maxMarks) * 100;
+          const resitMax = m.resitMaxMarks || m.assessment.maxMarks;
+          const resitPerc = (m.resitScore / resitMax) * 100;
           return (perc + resitPerc) / 2;
         }
         return perc;
@@ -861,7 +862,8 @@ export default function App() {
       const getEffectivePerc = (m: Mark & { assessment: Assessment }) => {
         const perc = (m.score / m.assessment.maxMarks) * 100;
         if (m.resitScore !== undefined && m.resitScore !== null) {
-          const resitPerc = (m.resitScore / m.assessment.maxMarks) * 100;
+          const resitMax = m.resitMaxMarks || m.assessment.maxMarks;
+          const resitPerc = (m.resitScore / resitMax) * 100;
           return (perc + resitPerc) / 2;
         }
         return perc;
@@ -2652,7 +2654,7 @@ export default function App() {
     }
 
     const assessment = assessments.find(a => a.id === assessmentId);
-    const maxMarks = assessment?.maxMarks || 100;
+    const maxMarks = (existingMark as any)?.resitMaxMarks || assessment?.maxMarks || 100;
     const validatedScore = Math.min(maxMarks, Math.max(0, resitScore));
     
     if (existingMark) {
@@ -2665,6 +2667,23 @@ export default function App() {
         score: 0,
         resitScore: validatedScore 
       }]);
+    }
+  };
+
+  const handleUpdateResitMax = (studentId: string, assessmentId: string, resitMax: number | null) => {
+    const existingMark = marks.find(m => m.studentId === studentId && m.assessmentId === assessmentId);
+    
+    if (resitMax === null || isNaN(resitMax)) {
+      if (existingMark) {
+        const updated = { ...existingMark };
+        delete (updated as any).resitMaxMarks;
+        setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+      }
+      return;
+    }
+
+    if (existingMark) {
+      setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, resitMaxMarks: resitMax } : m));
     }
   };
 
@@ -5269,23 +5288,37 @@ export default function App() {
                                             handleUpdateMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
                                           }}
                                         />
-                                        <input 
-                                          type="number" 
-                                          placeholder="Resit"
-                                          disabled={(mark as any)?.absent}
-                                          className={`w-14 px-1.5 py-0.5 border border-dashed rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
-                                            (mark as any)?.absent
-                                              ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
-                                              : 'bg-indigo-50 border-indigo-200 placeholder-indigo-300'
-                                          }`}
-                                          value={(mark as any)?.absent ? '' : (mark?.resitScore ?? '')}
-                                          min="0"
-                                          max={assessment?.maxMarks || 100}
-                                          onChange={e => {
-                                            const val = e.target.value;
-                                            handleUpdateResitMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
-                                          }}
-                                        />
+                                        <div className="flex gap-1">
+                                          <input 
+                                            type="number" 
+                                            placeholder="Resit"
+                                            disabled={(mark as any)?.absent}
+                                            className={`w-14 px-1.5 py-0.5 border border-dashed rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                              (mark as any)?.absent
+                                                ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                                                : 'bg-indigo-50 border-indigo-200 placeholder-indigo-300'
+                                            }`}
+                                            value={(mark as any)?.absent ? '' : (mark?.resitScore ?? '')}
+                                            min="0"
+                                            max={mark?.resitMaxMarks || assessment?.maxMarks || 100}
+                                            onChange={e => {
+                                              const val = e.target.value;
+                                              handleUpdateResitMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                            }}
+                                          />
+                                          <input 
+                                            type="number" 
+                                            placeholder="Max"
+                                            disabled={(mark as any)?.absent}
+                                            className={`w-10 px-1 py-0.5 border border-slate-100 rounded text-[9px] outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-slate-500 font-bold`}
+                                            value={(mark as any)?.absent ? '' : (mark?.resitMaxMarks ?? '')}
+                                            min="1"
+                                            onChange={e => {
+                                              const val = e.target.value;
+                                              handleUpdateResitMax(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                            }}
+                                          />
+                                        </div>
                                       </div>
                                       <span className={`text-[9px] font-bold w-7 text-right ${
                                         (mark as any)?.absent ? 'text-rose-400' : mark === undefined ? 'text-amber-400' : 'text-slate-400'
@@ -5295,8 +5328,8 @@ export default function App() {
                                           if (!mark) return '—';
                                           const score = mark.score;
                                           const resit = mark.resitScore;
-                                          const finalScore = resit !== undefined ? (score + resit) / 2 : score;
-                                          return `${((finalScore / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%`;
+                                          const finalScore = resit !== undefined ? (score / (assessment?.maxMarks || 1) * 100 + resit / (mark.resitMaxMarks || assessment?.maxMarks || 1) * 100) / 2 : (score / (assessment?.maxMarks || 1) * 100);
+                                          return `${finalScore.toFixed(0)}%`;
                                         })()}
                                       </span>
                                     </div>
