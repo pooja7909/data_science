@@ -43,6 +43,7 @@ export interface Mark {
   assessmentId: string;
   score: number;
   resitScore?: number;
+  resitMaxMarks?: number;
   questionScores?: Record<string, number>;
   absent?: boolean;
 }
