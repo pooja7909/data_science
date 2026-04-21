@@ -32,7 +32,7 @@ export interface Assessment {
   maxMarks: number;
   yearGroup: YearGroup;
   academicYear: string;
-  ibLevel?: 'HL' | 'SL';
+  ibLevel?: 'HL' | 'SL' | 'Both';
   boundaries?: GradeBoundary[];
   questions?: Question[];
 }
