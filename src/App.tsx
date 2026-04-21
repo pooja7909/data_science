@@ -211,7 +211,21 @@ export default function App() {
     date: new Date().toISOString().split('T')[0] 
   });
   const [marksGroupFilter, setMarksGroupFilter] = useState<string>('all');
-  const [newAssessment, setNewAssessment] = useState({ name: '', subject: 'Computer Science', maxMarks: 100, date: new Date().toISOString().split('T')[0], yearGroup: 7 as YearGroup });
+  const [newAssessment, setNewAssessment] = useState<{
+    name: string;
+    subject: string;
+    maxMarks: number;
+    date: string;
+    yearGroup: YearGroup;
+    ibLevel?: 'HL' | 'SL' | 'Both';
+  }>({ 
+    name: '', 
+    subject: 'Computer Science', 
+    maxMarks: 100, 
+    date: new Date().toISOString().split('T')[0], 
+    yearGroup: 7 as YearGroup,
+    ibLevel: 'Both'
+  });
   const [newStudent, setNewStudent] = useState<{
     name: string;
     preferredName: string;
@@ -639,7 +653,7 @@ export default function App() {
             ...m,
             assessment: currentYearAssessments.find(a => a.id === m.assessmentId)!
           }))
-          .filter(m => m.assessment)
+          .filter(m => m.assessment && (!m.assessment.ibLevel || m.assessment.ibLevel === 'Both' || m.assessment.ibLevel === student.ibLevel))
       ].sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
       // Only include marks where the student actually sat the assessment (not absent)
@@ -803,7 +817,12 @@ export default function App() {
           ...m,
           assessment: currentYearAssessments.find(a => a.id === m.assessmentId)!
         }))
-        .filter(m => m.assessment && (performanceSubjectFilter === 'all' || m.assessment.subject === performanceSubjectFilter))
+        .filter(m => {
+          if (!m.assessment) return false;
+          const subjectMatches = performanceSubjectFilter === 'all' || m.assessment.subject === performanceSubjectFilter;
+          const levelMatches = !m.assessment.ibLevel || m.assessment.ibLevel === 'Both' || m.assessment.ibLevel === student.ibLevel;
+          return subjectMatches && levelMatches;
+        })
         .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
         .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
@@ -4029,7 +4048,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {assessments
-                  .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter) && (performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter) && (ibLevelFilter === 'all' || !a.ibLevel || a.ibLevel === ibLevelFilter))
+                  .filter(a => a.academicYear === selectedAcademicYear && matchesYearFilter(a.yearGroup, yearFilter) && (performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter) && (ibLevelFilter === 'all' || !a.ibLevel || a.ibLevel === 'Both' || a.ibLevel === ibLevelFilter))
                   .map(assessment => (
                   <div key={assessment.id} className="card p-6 hover:border-indigo-200 transition-colors group">
                     <div className="flex justify-between items-start mb-4">
@@ -4064,7 +4083,8 @@ export default function App() {
                               subject: assessment.subject,
                               maxMarks: assessment.maxMarks,
                               date: assessment.date,
-                              yearGroup: assessment.yearGroup
+                              yearGroup: assessment.yearGroup,
+                              ibLevel: assessment.ibLevel || 'Both'
                             });
                             setShowAssessmentModal(true);
                           }}
@@ -4601,18 +4621,20 @@ export default function App() {
                     <div className="pb-4 border-b border-slate-100">
                       <label className="block text-sm font-medium text-slate-700 mb-2">Scope / Level</label>
                       <div className="flex gap-2">
-                        {(['all', 'HL', 'SL'] as const).map(level => (
+                        {(['Both', 'HL', 'SL'] as const).map(level => (
                           <button
                             key={level}
                             type="button"
-                            onClick={() => setNewAssessment({ ...newAssessment, ibLevel: level === 'all' ? undefined : level as any })}
+                            onClick={() => setNewAssessment({ ...newAssessment, ibLevel: level })}
                             className={`flex-1 px-4 py-2 border rounded-xl font-bold transition-all ${
-                              (level === 'all' && !newAssessment.ibLevel) || (newAssessment.ibLevel === level)
-                                ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 'bg-sky-500 text-white border-sky-500'
+                              newAssessment.ibLevel === level
+                                ? level === 'HL' ? 'bg-violet-600 text-white border-violet-600' : 
+                                  level === 'SL' ? 'bg-sky-500 text-white border-sky-500' :
+                                  'bg-slate-700 text-white border-slate-700'
                                 : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
                             }`}
                           >
-                            {level === 'all' ? 'All (Both)' : level}
+                            {level}
                           </button>
                         ))}
                       </div>
