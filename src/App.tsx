@@ -248,6 +248,27 @@ export default function App() {
   const [modalGroupFilter, setModalGroupFilter] = useState<string>('all');
   const [marksLevelFilter, setMarksLevelFilter] = useState<'all' | 'HL' | 'SL'>('all');
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
+
+  const getStudentBoundaries = (student: Student) => {
+    let boundaryKey = String(student.yearGroup);
+    if (String(student.yearGroup).includes('IB')) {
+      if (student.ibLevel) {
+        boundaryKey = `${student.yearGroup} ${student.ibLevel}`;
+      }
+    }
+    return yearBoundaries[student.groupName] || yearBoundaries[boundaryKey] || yearBoundaries[String(student.yearGroup)] || (
+      String(student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
+      String(student.yearGroup).includes('IB') ? IB_BOUNDARIES : KS3_BOUNDARIES
+    );
+  };
+
+  const getGrade = (percentage: number, boundaries: GradeBoundary[]) => {
+    const sorted = [...boundaries].sort((a, b) => b.minPercentage - a.minPercentage);
+    for (const b of sorted) {
+      if (percentage >= b.minPercentage) return b.grade;
+    }
+    return 'U';
+  };
   const [showPaperGradingModal, setShowPaperGradingModal] = useState<string | null>(null);
   const [extractionMode, setExtractionMode] = useState<'questions' | 'subparts'>('questions');
   const [marksheetSort, setMarksheetSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'level', direction: 'asc' });
@@ -2456,27 +2477,6 @@ export default function App() {
         score: validatedScore 
       }]);
     }
-  };
-
-  const getStudentBoundaries = (student: Student) => {
-    let boundaryKey = String(student.yearGroup);
-    if (String(student.yearGroup).includes('IB')) {
-      if (student.ibLevel) {
-        boundaryKey = `${student.yearGroup} ${student.ibLevel}`;
-      }
-    }
-    return yearBoundaries[student.groupName] || yearBoundaries[boundaryKey] || yearBoundaries[String(student.yearGroup)] || (
-      String(student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
-      String(student.yearGroup).includes('IB') ? IB_BOUNDARIES : KS3_BOUNDARIES
-    );
-  };
-
-  const getGrade = (percentage: number, boundaries: GradeBoundary[]) => {
-    const sorted = [...boundaries].sort((a, b) => b.minPercentage - a.minPercentage);
-    for (const b of sorted) {
-      if (percentage >= b.minPercentage) return b.grade;
-    }
-    return 'U';
   };
 
   const getStatusColor = (status: string) => {
