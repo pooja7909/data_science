@@ -42,7 +42,9 @@ export interface Mark {
   studentId: string;
   assessmentId: string;
   score: number;
+  resitScore?: number;
   questionScores?: Record<string, number>;
+  absent?: boolean;
 }
 
 export interface GradeBoundary {
