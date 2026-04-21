@@ -672,14 +672,23 @@ export default function App() {
       const sittingMarks = studentMarks.filter(m => !(m as any).absent);
       const absentCount = studentMarks.length - sittingMarks.length;
 
-      const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
+      const getEffectivePerc = (m: Mark & { assessment: Assessment }) => {
+        const perc = (m.score / m.assessment.maxMarks) * 100;
+        if (m.resitScore !== undefined && m.resitScore !== null) {
+          const resitPerc = (m.resitScore / m.assessment.maxMarks) * 100;
+          return (perc + resitPerc) / 2;
+        }
+        return perc;
+      };
+
+      const totalPercentage = sittingMarks.reduce((acc, m) => acc + getEffectivePerc(m), 0);
       const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : null;
 
       // Calculate Average Points
       const marksWithPoints = sittingMarks.map(m => {
-        const perc = (m.score / m.assessment.maxMarks) * 100;
+        const effPerc = getEffectivePerc(m);
         const boundaries = getStudentBoundaries(student);
-        const grade = getGrade(perc, boundaries);
+        const grade = getGrade(effPerc, boundaries);
         return gradeToPoints(grade);
       });
       const averagePoints = marksWithPoints.length > 0 ? marksWithPoints.reduce((s, p) => s + p, 0) / marksWithPoints.length : (averagePercentage !== null ? gradeToPoints(getGrade(averagePercentage, getStudentBoundaries(student))) : null);
@@ -687,8 +696,8 @@ export default function App() {
       // Trend: only from assessments the student sat, need at least 2
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
       if (sittingMarks.length >= 2) {
-        const last = (sittingMarks[sittingMarks.length - 1].score / sittingMarks[sittingMarks.length - 1].assessment.maxMarks) * 100;
-        const prev = (sittingMarks[sittingMarks.length - 2].score / sittingMarks[sittingMarks.length - 2].assessment.maxMarks) * 100;
+        const last = getEffectivePerc(sittingMarks[sittingMarks.length - 1]);
+        const prev = getEffectivePerc(sittingMarks[sittingMarks.length - 2]);
         if (last > prev + 2) trend = 'improving';
         else if (last < prev - 2) trend = 'declining';
       }
@@ -846,16 +855,26 @@ export default function App() {
         .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
         .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
 
-      // Exclude absent marks from average — only count assessments actually sat
+      // Only include marks where the student actually sat the assessment (not absent)
       const sittingMarks = allStudentMarks.filter(m => !(m as any).absent);
-      const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
+
+      const getEffectivePerc = (m: Mark & { assessment: Assessment }) => {
+        const perc = (m.score / m.assessment.maxMarks) * 100;
+        if (m.resitScore !== undefined && m.resitScore !== null) {
+          const resitPerc = (m.resitScore / m.assessment.maxMarks) * 100;
+          return (perc + resitPerc) / 2;
+        }
+        return perc;
+      };
+
+      const totalPercentage = sittingMarks.reduce((acc, m) => acc + getEffectivePerc(m), 0);
       const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : 0;
 
       // Calculate Average Points
       const marksWithPoints = sittingMarks.map(m => {
-        const perc = (m.score / m.assessment.maxMarks) * 100;
+        const effPerc = getEffectivePerc(m);
         const boundaries = getStudentBoundaries(student);
-        const grade = getGrade(perc, boundaries);
+        const grade = getGrade(effPerc, boundaries);
         return gradeToPoints(grade);
       });
       const averagePoints = marksWithPoints.length > 0 ? marksWithPoints.reduce((s, p) => s + p, 0) / marksWithPoints.length : gradeToPoints(getGrade(averagePercentage, getStudentBoundaries(student)));
@@ -863,8 +882,8 @@ export default function App() {
       // Trend: only from assessments the student sat, need at least 2
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
       if (sittingMarks.length >= 2) {
-        const last = (sittingMarks[sittingMarks.length - 1].score / sittingMarks[sittingMarks.length - 1].assessment.maxMarks) * 100;
-        const prev = (sittingMarks[sittingMarks.length - 2].score / sittingMarks[sittingMarks.length - 2].assessment.maxMarks) * 100;
+        const last = getEffectivePerc(sittingMarks[sittingMarks.length - 1]);
+        const prev = getEffectivePerc(sittingMarks[sittingMarks.length - 2]);
         if (last > prev + 2) trend = 'improving';
         else if (last < prev - 2) trend = 'declining';
       }
@@ -1006,22 +1025,36 @@ export default function App() {
 
     const mostImproved = studentTrends[0]?.improvement > 0 ? studentTrends[0] : null;
 
-    // Highest performing group
+    // Group calculations
+    const displayKey = performanceDisplayMode === 'percentage' ? 'averagePercentage' : 'averagePoints';
     const groupMap: Record<string, { total: number, count: number }> = {};
+    const ibLevelMap: Record<string, { total: number, count: number }> = {};
+
     performanceTabStats.forEach(p => {
-      const key = p.student.groupName || 'General';
-      if (!groupMap[key]) groupMap[key] = { total: 0, count: 0 };
-      groupMap[key].total += (p as any)[dataKey];
-      groupMap[key].count += 1;
+      // Group Name
+      const gKey = p.student.groupName || 'General';
+      if (!groupMap[gKey]) groupMap[gKey] = { total: 0, count: 0 };
+      groupMap[gKey].total += (p as any)[displayKey];
+      groupMap[gKey].count += 1;
+
+      // IB Levels (for Year 12/13)
+      if (String(p.student.yearGroup).includes('IB') && p.student.ibLevel) {
+        const ibKey = `IB ${p.student.ibLevel}`;
+        if (!ibLevelMap[ibKey]) ibLevelMap[ibKey] = { total: 0, count: 0 };
+        ibLevelMap[ibKey].total += (p as any)[displayKey];
+        ibLevelMap[ibKey].count += 1;
+      }
     });
-    const bestGroup = Object.entries(groupMap)
-      .map(([name, data]) => ({ name, avg: data.total / data.count }))
-      .sort((a, b) => b.avg - a.avg)[0];
+
+    const allGroupAverages = [
+      ...Object.entries(groupMap).map(([name, data]) => ({ name, avg: data.total / data.count })),
+      ...Object.entries(ibLevelMap).map(([name, data]) => ({ name, avg: data.total / data.count }))
+    ].sort((a, b) => b.avg - a.avg);
 
     return {
       average: avg,
       mostImproved,
-      bestGroup,
+      allGroupAverages,
       labelSuffix
     };
   }, [performanceTabStats, performances, performanceDisplayMode]);
@@ -2580,8 +2613,12 @@ export default function App() {
     
     if (score === null || isNaN(score)) {
       if (existingMark) {
-        fbDeleteMark(existingMark.id);
-        setMarks(prev => prev.filter(m => m.id !== existingMark.id));
+        if (existingMark.resitScore === undefined) {
+           fbDeleteMark(existingMark.id);
+           setMarks(prev => prev.filter(m => m.id !== existingMark.id));
+        } else {
+           setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, score: 0 } : m));
+        }
       }
       return;
     }
@@ -2598,6 +2635,35 @@ export default function App() {
         studentId, 
         assessmentId, 
         score: validatedScore 
+      }]);
+    }
+  };
+
+  const handleUpdateResitMark = (studentId: string, assessmentId: string, resitScore: number | null) => {
+    const existingMark = marks.find(m => m.studentId === studentId && m.assessmentId === assessmentId);
+    
+    if (resitScore === null || isNaN(resitScore)) {
+      if (existingMark) {
+        const updated = { ...existingMark };
+        delete (updated as any).resitScore;
+        setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+      }
+      return;
+    }
+
+    const assessment = assessments.find(a => a.id === assessmentId);
+    const maxMarks = assessment?.maxMarks || 100;
+    const validatedScore = Math.min(maxMarks, Math.max(0, resitScore));
+    
+    if (existingMark) {
+      setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, resitScore: validatedScore } : m));
+    } else {
+      setMarks(prev => [...prev, { 
+        id: Math.random().toString(36).substr(2, 9),
+        studentId, 
+        assessmentId, 
+        score: 0,
+        resitScore: validatedScore 
       }]);
     }
   };
@@ -3146,14 +3212,20 @@ export default function App() {
                     <h4 className="text-xl font-bold text-slate-900">{performanceInsights?.average.toFixed(performanceDisplayMode === 'points' ? 2 : 1)}{performanceInsights?.labelSuffix}</h4>
                   </div>
                 </div>
-                <div className="card p-4 flex items-center gap-4 bg-white">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600">
-                    <Users className="w-6 h-6" />
+                <div className="card p-4 flex flex-col gap-2 bg-white overflow-y-auto max-h-[85px] custom-scrollbar">
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
+                      <Users className="w-3.5 h-3.5" />
+                    </div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Group Averages</p>
                   </div>
-                  <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Best Group</p>
-                    <h4 className="text-xl font-bold text-slate-900">{performanceInsights?.bestGroup?.name || 'N/A'}</h4>
-                    <p className="text-[10px] text-emerald-600 font-bold">{performanceInsights?.bestGroup?.avg.toFixed(1)}% Avg</p>
+                  <div className="space-y-1">
+                    {performanceInsights?.allGroupAverages.map(g => (
+                      <div key={g.name} className="flex justify-between items-center text-[10px] font-bold border-b border-slate-50 last:border-0 pb-0.5">
+                        <span className="text-slate-600 truncate max-w-[120px]">{g.name}</span>
+                        <span className="text-emerald-600">{g.avg.toFixed(performanceDisplayMode === 'points' ? 2 : 1)}{performanceInsights.labelSuffix}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <div className="card p-4 flex items-center gap-4 bg-white">
@@ -5161,6 +5233,9 @@ export default function App() {
                                       {(mark as any)?.absent && (
                                         <span className="text-[8px] font-bold text-rose-500 uppercase tracking-wide">Absent — excluded from avg</span>
                                       )}
+                                      {mark?.resitScore !== undefined && (
+                                        <span className="text-[8px] font-bold text-indigo-500 uppercase tracking-wide">Using avg (Score + Resit)</span>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                       {/* Absent toggle */}
@@ -5176,27 +5251,53 @@ export default function App() {
                                       >
                                         ABS
                                       </button>
-                                      <input 
-                                        type="number" 
-                                        placeholder="Score"
-                                        disabled={(mark as any)?.absent}
-                                        className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
-                                          (mark as any)?.absent
-                                            ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
-                                            : mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'
-                                        }`}
-                                        value={(mark as any)?.absent ? '' : (mark?.score ?? '')}
-                                        min="0"
-                                        max={assessment?.maxMarks || 100}
-                                        onChange={e => {
-                                          const val = e.target.value;
-                                          handleUpdateMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
-                                        }}
-                                      />
+                                      <div className="flex flex-col gap-1 items-end">
+                                        <input 
+                                          type="number" 
+                                          placeholder="Score"
+                                          disabled={(mark as any)?.absent}
+                                          className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                            (mark as any)?.absent
+                                              ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                                              : mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'
+                                          }`}
+                                          value={(mark as any)?.absent ? '' : (mark?.score ?? '')}
+                                          min="0"
+                                          max={assessment?.maxMarks || 100}
+                                          onChange={e => {
+                                            const val = e.target.value;
+                                            handleUpdateMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                          }}
+                                        />
+                                        <input 
+                                          type="number" 
+                                          placeholder="Resit"
+                                          disabled={(mark as any)?.absent}
+                                          className={`w-14 px-1.5 py-0.5 border border-dashed rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                            (mark as any)?.absent
+                                              ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                                              : 'bg-indigo-50 border-indigo-200 placeholder-indigo-300'
+                                          }`}
+                                          value={(mark as any)?.absent ? '' : (mark?.resitScore ?? '')}
+                                          min="0"
+                                          max={assessment?.maxMarks || 100}
+                                          onChange={e => {
+                                            const val = e.target.value;
+                                            handleUpdateResitMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                          }}
+                                        />
+                                      </div>
                                       <span className={`text-[9px] font-bold w-7 text-right ${
                                         (mark as any)?.absent ? 'text-rose-400' : mark === undefined ? 'text-amber-400' : 'text-slate-400'
                                       }`}>
-                                        {(mark as any)?.absent ? 'ABS' : mark !== undefined ? `${((mark.score / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%` : '—'}
+                                        {(() => {
+                                          if ((mark as any)?.absent) return 'ABS';
+                                          if (!mark) return '—';
+                                          const score = mark.score;
+                                          const resit = mark.resitScore;
+                                          const finalScore = resit !== undefined ? (score + resit) / 2 : score;
+                                          return `${((finalScore / (assessment?.maxMarks || 1)) * 100).toFixed(0)}%`;
+                                        })()}
                                       </span>
                                     </div>
                                   </div>
