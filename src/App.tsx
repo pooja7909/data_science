@@ -24,7 +24,8 @@ import {
   Cloud,
   History,
   RefreshCw,
-  Database
+  Database,
+  HelpCircle
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -866,8 +867,28 @@ export default function App() {
     });
 
     return Object.entries(distribution)
-      .map(([grade, count]) => ({ grade, count }))
-      .sort((a, b) => b.count - a.count);
+      .map(([grade, count]) => {
+        let color = 'bg-blue-500';
+        const g = grade.toUpperCase();
+        if (g === '7' || g === '9' || g === 'A*' || g === 'EXCEEDING' || g === '8') color = 'bg-emerald-500';
+        else if (g === 'U' || g === '1' || g === 'WORKING TOWARDS') color = 'bg-rose-500';
+        else if (g === '2' || g === '3') color = 'bg-orange-500';
+        else if (g === '5' || g === '6' || g === 'AT') color = 'bg-indigo-500';
+        
+        return {
+          label: grade,
+          count,
+          color
+        };
+      })
+      .sort((a, b) => {
+        // Try to sort by numerical value or predefined order
+        const order = ['7', '6', '5', '4', '3', '2', '1', 'U', 'A*', 'A', 'B', 'C', 'D', 'E', 'F', 'EXCEEDING', 'AT', 'WORKING TOWARDS'];
+        const idxA = order.indexOf(a.label.toUpperCase());
+        const idxB = order.indexOf(b.label.toUpperCase());
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        return b.count - a.count;
+      });
   };
 
   const gradeDistribution = useMemo(() => {
@@ -2815,6 +2836,38 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Logic Documentation Section */}
+                <div className="lg:col-span-3">
+                  <div className="card bg-indigo-50/30 border-indigo-100 p-6 flex flex-col md:flex-row gap-6 md:items-center">
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600 flex-shrink-0">
+                      <HelpCircle className="w-6 h-6" />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-1">
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-sm mb-2 flex items-center gap-2">
+                          <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+                          Top Performers Logic
+                        </h4>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          Students with an average at or above the highest defined Grade Boundary 
+                          (e.g., Grade 7, A*, or Exceeding). Students flagged for support are automatically excluded from this list.
+                        </p>
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-sm mb-2 flex items-center gap-2">
+                          <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
+                          Needs Support Logic
+                        </h4>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          Students whose average falls below the target threshold. Triggered if average is 
+                          below <strong>Grade 5</strong> (IB/IGCSE) or below <strong>"At"</strong> (KS3). 
+                          Also flags students with declining trends just above the threshold.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {filteredPerformances.length === 0 ? (
                   <div className="lg:col-span-3 card p-12 flex flex-col items-center justify-center text-center bg-slate-50/50 border-dashed border-2">
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-4">
