@@ -180,7 +180,11 @@ export default function App() {
     '10 IGCSE': [...IGCSE_BOUNDARIES],
     '11 IGCSE': [...IGCSE_BOUNDARIES],
     '12 IB': [...IB_BOUNDARIES],
+    '12 IB HL': [...IB_BOUNDARIES],
+    '12 IB SL': [...IB_BOUNDARIES],
     '13 IB': [...IB_BOUNDARIES],
+    '13 IB HL': [...IB_BOUNDARIES],
+    '13 IB SL': [...IB_BOUNDARIES],
   });
   const [selectedSettingScope, setSelectedSettingScope] = useState<string>('7');
   const [groups, setGroups] = useState<Group[]>([]);
@@ -637,7 +641,14 @@ export default function App() {
       // Status: only meaningful if student has sat at least 1 assessment
       let status: 'excellent' | 'on-track' | 'needs-improvement' | 'no-data' = averagePercentage === null ? 'no-data' : 'on-track';
       if (averagePercentage !== null) {
-        const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
+        let boundaryKey = String(student.yearGroup);
+        if (String(student.yearGroup).includes('IB')) {
+          if (student.ibLevel) {
+            boundaryKey = `${student.yearGroup} ${student.ibLevel}`;
+          }
+          // If the specific HL/SL key isn't in yearBoundaries yet, the fallback to yearGroup key below remains valid
+        }
+        const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[boundaryKey] || yearBoundaries[String(student.yearGroup)] || [];
         const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
         const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
         
@@ -656,8 +667,13 @@ export default function App() {
 
         if (averagePercentage >= topBoundary) {
           status = 'excellent';
-        } else if (trend === 'declining' && averagePercentage < supportThreshold) {
+        } else if (averagePercentage < supportThreshold) {
+          // If significantly below threshold OR declining and just below
           status = 'needs-improvement';
+        } else if (trend === 'declining' && averagePercentage < supportThreshold + 5) {
+          // "At Risk" but still officially on track for now by status string logic
+          // You could add an 'at-risk' status if desired
+          status = 'on-track';
         }
       }
 
@@ -742,7 +758,7 @@ export default function App() {
 
   const topPerformers = useMemo(() => {
     return [...filteredPerformances]
-      .filter(p => (p as any).hasData) // only students who have actually sat at least one assessment
+      .filter(p => (p as any).hasData && p.status !== 'needs-improvement') // exclude struggling students from top performers
       .sort((a, b) => b.averagePercentage - a.averagePercentage)
       .slice(0, 5);
   }, [filteredPerformances]);
@@ -786,7 +802,7 @@ export default function App() {
       // Status logic
       let status: 'excellent' | 'on-track' | 'needs-improvement' | 'no-data' = sittingMarks.length === 0 ? 'no-data' : 'on-track';
       if (sittingMarks.length > 0) {
-        const currentBoundaries = yearBoundaries[student.groupName] || yearBoundaries[student.yearGroup] || [];
+        const currentBoundaries = getStudentBoundaries(student);
         const sortedBoundaries = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
         const topBoundary = sortedBoundaries[0]?.minPercentage || 80;
         
@@ -802,7 +818,7 @@ export default function App() {
 
         if (averagePercentage >= topBoundary) {
           status = 'excellent';
-        } else if (trend === 'declining' && averagePercentage < supportThreshold) {
+        } else if (averagePercentage < supportThreshold) {
           status = 'needs-improvement';
         }
       }
@@ -819,65 +835,31 @@ export default function App() {
     }).filter(p => p.count > 0); // exclude students with no real marks at all
   }, [students, assessments, marks, performanceSubjectFilter, yearFilter, selectedAcademicYear, yearBoundaries]);
 
-  const calculateGradeDistribution = (stats: any[], yearFilterScope: string) => {
-    // Determine which year group to use for boundaries
-    let currentYearGroup: YearGroup = 7;
-    if (yearFilterScope !== 'all' && yearFilterScope !== 'IGCSE_ALL' && yearFilterScope !== 'IB_ALL') {
-      currentYearGroup = yearFilterScope as YearGroup;
-    } else if (stats.length > 0) {
-      currentYearGroup = stats[0].student?.yearGroup || stats[0].student.yearGroup || 7;
-    }
-
-    const currentBoundaries = yearBoundaries[currentYearGroup] || (
-      String(currentYearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
-      String(currentYearGroup).includes('IB') ? IB_BOUNDARIES : KS3_BOUNDARIES
-    );
-    const sorted = [...currentBoundaries].sort((a, b) => b.minPercentage - a.minPercentage);
-
-    const data = sorted.map((boundary, idx) => {
-      const exclusiveCount = stats.filter(p => {
-        const score = p.averagePercentage;
-        const hasAnyData = p.hasData !== undefined ? p.hasData : (p.count > 0);
-        if (!hasAnyData) return false;
-        
-        const isMin = score >= boundary.minPercentage;
-        const isMax = idx === 0 ? true : score < sorted[idx - 1].minPercentage;
-        return isMin && isMax;
-      }).length;
-
-      let color = 'bg-blue-500';
-      if (idx === 0) color = 'bg-emerald-500';
-      else if (idx === sorted.length - 1) color = 'bg-rose-500';
-      else if (idx === sorted.length - 2) color = 'bg-orange-500';
-
-      return {
-        label: `${boundary.grade} (${boundary.minPercentage}%+)`,
-        count: exclusiveCount,
-        color
-      };
+  const calculateGradeDistribution = (stats: any[]) => {
+    const distribution: Record<string, number> = {};
+    
+    stats.forEach(p => {
+      const boundaries = getStudentBoundaries(p.student);
+      const grade = getGrade(p.averagePercentage, boundaries);
+      distribution[grade] = (distribution[grade] || 0) + 1;
     });
 
-    const noDataCount = stats.filter(p => {
-       const hasAnyData = p.hasData !== undefined ? p.hasData : (p.count > 0);
-       return !hasAnyData;
-    }).length;
-    
-    if (noDataCount > 0) {
-      data.push({ label: 'New / No Data', count: noDataCount, color: 'bg-slate-300' });
-    }
-    return data;
+    return Object.entries(distribution)
+      .map(([grade, count]) => ({ grade, count }))
+      .sort((a, b) => b.count - a.count);
   };
 
   const gradeDistribution = useMemo(() => {
-    return calculateGradeDistribution(filteredPerformances, yearFilter);
-  }, [filteredPerformances, yearFilter, yearBoundaries]);
+    return calculateGradeDistribution(filteredPerformances);
+  }, [filteredPerformances, yearBoundaries]);
 
   const performanceTabGradeDistribution = useMemo(() => {
-    return calculateGradeDistribution(performanceTabStats, yearFilter);
-  }, [performanceTabStats, yearFilter, yearBoundaries]);
+    return calculateGradeDistribution(performanceTabStats);
+  }, [performanceTabStats, yearBoundaries]);
 
   const topPerformersList = useMemo(() => {
     return [...performanceTabStats]
+      .filter(p => p.status !== 'needs-improvement')
       .sort((a, b) => b.averagePercentage - a.averagePercentage)
       .slice(0, 5);
   }, [performanceTabStats]);
@@ -2476,6 +2458,19 @@ export default function App() {
     }
   };
 
+  const getStudentBoundaries = (student: Student) => {
+    let boundaryKey = String(student.yearGroup);
+    if (String(student.yearGroup).includes('IB')) {
+      if (student.ibLevel) {
+        boundaryKey = `${student.yearGroup} ${student.ibLevel}`;
+      }
+    }
+    return yearBoundaries[student.groupName] || yearBoundaries[boundaryKey] || yearBoundaries[String(student.yearGroup)] || (
+      String(student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
+      String(student.yearGroup).includes('IB') ? IB_BOUNDARIES : KS3_BOUNDARIES
+    );
+  };
+
   const getGrade = (percentage: number, boundaries: GradeBoundary[]) => {
     const sorted = [...boundaries].sort((a, b) => b.minPercentage - a.minPercentage);
     for (const b of sorted) {
@@ -3036,11 +3031,7 @@ export default function App() {
                             </span>
                             {(p as any).hasData && (
                               <span className="text-[10px] font-black text-slate-800 tracking-tighter">
-                                {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
-                                  String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
-                                  String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
-                                  KS3_BOUNDARIES
-                                ))}
+                                {getGrade(p.averagePercentage, getStudentBoundaries(p.student))}
                               </span>
                             )}
                           </div>
@@ -3078,11 +3069,7 @@ export default function App() {
                             </span>
                             {(p as any).hasData && (
                               <span className="text-[10px] font-black text-slate-800 tracking-tighter">
-                                {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
-                                  String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
-                                  String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
-                                  KS3_BOUNDARIES
-                                ))}
+                                {getGrade(p.averagePercentage, getStudentBoundaries(p.student))}
                               </span>
                             )}
                           </div>
@@ -3385,11 +3372,7 @@ export default function App() {
                                       p.status === 'needs-improvement' ? 'bg-rose-100 text-rose-700' :
                                       'bg-indigo-100 text-indigo-700'
                                     }`}>
-                                      {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
-                                        String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
-                                        String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
-                                        KS3_BOUNDARIES
-                                      ))}
+                                      {getGrade(p.averagePercentage, getStudentBoundaries(p.student))}
                                     </span>
                                   ) : (
                                     <span className="text-[10px] italic text-slate-300">—</span>
@@ -3641,11 +3624,7 @@ export default function App() {
                                                     </span>
                                                     {(p as any).hasData && (
                                                       <span className="text-[9px] font-black text-slate-700 mt-0.5">
-                                                        {getGrade(p.averagePercentage, yearBoundaries[p.student.groupName] || yearBoundaries[p.student.yearGroup] || (
-                                                          String(p.student.yearGroup).includes('IB') ? IB_BOUNDARIES :
-                                                          String(p.student.yearGroup).includes('IGCSE') ? IGCSE_BOUNDARIES :
-                                                          KS3_BOUNDARIES
-                                                        ))}
+                                                        {getGrade(p.averagePercentage, getStudentBoundaries(p.student))}
                                                       </span>
                                                     )}
                                                   </div>
@@ -4220,9 +4199,16 @@ export default function App() {
                     onChange={(e) => setSelectedSettingScope(e.target.value)}
                   >
                     <optgroup label="Year Groups">
-                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE'].map(y => (
                         <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                       ))}
+                      <option value="12 IB">Year 12 IB (Global)</option>
+                      <option value="12 IB HL">Year 12 IB (HL)</option>
+                      <option value="12 IB SL">Year 12 IB (SL)</option>
+                      <option value="13 IB">Year 13 IB (Global)</option>
+                      <option value="13 IB HL">Year 13 IB (HL)</option>
+                      <option value="13 IB SL">Year 13 IB (SL)</option>
+                      <option value="Graduated">Graduated</option>
                     </optgroup>
                     <optgroup label="Individual Classes">
                       {groups
