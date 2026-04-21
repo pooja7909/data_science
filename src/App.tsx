@@ -263,6 +263,18 @@ export default function App() {
   const [modalGroupFilter, setModalGroupFilter] = useState<string>('all');
   const [marksLevelFilter, setMarksLevelFilter] = useState<'all' | 'HL' | 'SL'>('all');
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
+  const [performanceDisplayMode, setPerformanceDisplayMode] = useState<'percentage' | 'points'>('percentage');
+
+  const gradeToPoints = (grade: string) => {
+    const num = parseInt(grade);
+    if (!isNaN(num)) return num;
+    const mapping: Record<string, number> = {
+      'A*': 9, 'A': 8, 'B': 7, 'C': 6, 'D': 5, 'E': 4, 'F': 3, 'G': 2, 'U': 0,
+      'OUTSTANDING': 6, 'SIGNIFICANTLY ABOVE': 5, 'ABOVE': 4, 'AT': 3, 'BELOW': 2, 'SIGNIFICANTLY BELOW': 1,
+      'EXCEEDING': 6, 'WORKING TOWARDS': 1
+    };
+    return mapping[grade.toUpperCase()] || 0;
+  };
 
   const getStudentBoundaries = (student: Student) => {
     let boundaryKey = String(student.yearGroup);
@@ -661,9 +673,16 @@ export default function App() {
       const absentCount = studentMarks.length - sittingMarks.length;
 
       const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
-      // averagePercentage is only over assessments the student actually sat
-      // Returns null if no data at all (new student or all absent) — null propagates through UI as "No data"
       const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : null;
+
+      // Calculate Average Points
+      const marksWithPoints = sittingMarks.map(m => {
+        const perc = (m.score / m.assessment.maxMarks) * 100;
+        const boundaries = getStudentBoundaries(student);
+        const grade = getGrade(perc, boundaries);
+        return gradeToPoints(grade);
+      });
+      const averagePoints = marksWithPoints.length > 0 ? marksWithPoints.reduce((s, p) => s + p, 0) / marksWithPoints.length : (averagePercentage !== null ? gradeToPoints(getGrade(averagePercentage, getStudentBoundaries(student))) : null);
 
       // Trend: only from assessments the student sat, need at least 2
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
@@ -719,6 +738,7 @@ export default function App() {
         sittingMarks,              // marks where student actually sat (for calculations)
         absentCount,
         averagePercentage: averagePercentage ?? 0, // 0 for type compat, use status==='no-data' to distinguish
+        averagePoints: averagePoints ?? 0,
         hasData: averagePercentage !== null,
         trend,
         status
@@ -831,6 +851,15 @@ export default function App() {
       const totalPercentage = sittingMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
       const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : 0;
 
+      // Calculate Average Points
+      const marksWithPoints = sittingMarks.map(m => {
+        const perc = (m.score / m.assessment.maxMarks) * 100;
+        const boundaries = getStudentBoundaries(student);
+        const grade = getGrade(perc, boundaries);
+        return gradeToPoints(grade);
+      });
+      const averagePoints = marksWithPoints.length > 0 ? marksWithPoints.reduce((s, p) => s + p, 0) / marksWithPoints.length : gradeToPoints(getGrade(averagePercentage, getStudentBoundaries(student)));
+
       // Trend: only from assessments the student sat, need at least 2
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
       if (sittingMarks.length >= 2) {
@@ -867,6 +896,7 @@ export default function App() {
       return {
         student,
         averagePercentage,
+        averagePoints,
         trend,
         status,
         count: sittingMarks.length,         // only assessments actually sat
@@ -919,18 +949,20 @@ export default function App() {
   }, [performanceTabStats, yearBoundaries]);
 
   const topPerformersList = useMemo(() => {
+    const dataKey = performanceDisplayMode === 'percentage' ? 'averagePercentage' : 'averagePoints';
     return [...performanceTabStats]
       .filter(p => p.status !== 'needs-improvement')
-      .sort((a, b) => b.averagePercentage - a.averagePercentage)
+      .sort((a, b) => (b as any)[dataKey] - (a as any)[dataKey])
       .slice(0, 5);
-  }, [performanceTabStats]);
+  }, [performanceTabStats, performanceDisplayMode]);
 
   const needsSupportList = useMemo(() => {
+    const dataKey = performanceDisplayMode === 'percentage' ? 'averagePercentage' : 'averagePoints';
     return [...performanceTabStats]
       .filter(p => p.status === 'needs-improvement')
-      .sort((a, b) => a.averagePercentage - b.averagePercentage)
+      .sort((a, b) => (a as any)[dataKey] - (b as any)[dataKey])
       .slice(0, 5);
-  }, [performanceTabStats]);
+  }, [performanceTabStats, performanceDisplayMode]);
 
   const performanceTabAssessments = useMemo(() => {
     return assessments
@@ -943,8 +975,11 @@ export default function App() {
   const performanceInsights = useMemo(() => {
     if (performanceTabStats.length === 0) return null;
 
+    const dataKey = performanceDisplayMode === 'percentage' ? 'averagePercentage' : 'averagePoints';
+    const labelSuffix = performanceDisplayMode === 'percentage' ? '%' : ' pts';
+
     // performanceTabStats already filters to students with count > 0, so all have real data
-    const avg = performanceTabStats.reduce((acc, p) => acc + p.averagePercentage, 0) / performanceTabStats.length;
+    const avg = performanceTabStats.reduce((acc, p) => acc + (p as any)[dataKey], 0) / performanceTabStats.length;
     
     // Find most improved student from filtered set
     const studentTrends = performances
@@ -953,8 +988,18 @@ export default function App() {
         // Use only marks where student actually sat the exam (not absent)
         const sitting = ((p as any).sittingMarks || p.marks.filter((m: any) => !m.absent));
         if (sitting.length < 2) return { id: p.student.id, improvement: 0 };
-        const last = (sitting[sitting.length - 1].score / sitting[sitting.length - 1].assessment.maxMarks) * 100;
-        const first = (sitting[0].score / sitting[0].assessment.maxMarks) * 100;
+        
+        const lastPerc = (sitting[sitting.length - 1].score / sitting[sitting.length - 1].assessment.maxMarks) * 100;
+        const firstPerc = (sitting[0].score / sitting[0].assessment.maxMarks) * 100;
+
+        const last = performanceDisplayMode === 'percentage' 
+          ? lastPerc
+          : gradeToPoints(getGrade(lastPerc, getStudentBoundaries(p.student)));
+        
+        const first = performanceDisplayMode === 'percentage'
+          ? firstPerc
+          : gradeToPoints(getGrade(firstPerc, getStudentBoundaries(p.student)));
+
         return { id: p.student.id, name: p.student.name, improvement: last - first };
       })
       .sort((a, b) => b.improvement - a.improvement);
@@ -966,7 +1011,7 @@ export default function App() {
     performanceTabStats.forEach(p => {
       const key = p.student.groupName || 'General';
       if (!groupMap[key]) groupMap[key] = { total: 0, count: 0 };
-      groupMap[key].total += p.averagePercentage;
+      groupMap[key].total += (p as any)[dataKey];
       groupMap[key].count += 1;
     });
     const bestGroup = Object.entries(groupMap)
@@ -976,14 +1021,16 @@ export default function App() {
     return {
       average: avg,
       mostImproved,
-      bestGroup
+      bestGroup,
+      labelSuffix
     };
-  }, [performanceTabStats, performances]);
+  }, [performanceTabStats, performances, performanceDisplayMode]);
 
   const individualStudentTrendData = useMemo(() => {
     if (selectedStudentForPerformance === 'none') return [];
     
     const currentYearAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
+    const student = students.find(s => s.id === selectedStudentForPerformance);
     
     return marks
       .filter(m => m.studentId === selectedStudentForPerformance)
@@ -994,13 +1041,22 @@ export default function App() {
       .filter(m => m.assessment && (performanceSubjectFilter === 'all' || m.assessment.subject === performanceSubjectFilter))
       .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
       .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime())
-      .map(m => ({
-        date: new Date(m.assessment.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        score: (m.score / m.assessment.maxMarks) * 100,
-        assessmentName: m.assessment.name,
-        subject: m.assessment.subject
-      }));
-  }, [selectedStudentForPerformance, marks, assessments, performanceSubjectFilter, yearFilter]);
+      .map(m => {
+        const perc = (m.score / m.assessment.maxMarks) * 100;
+        const boundaries = student ? getStudentBoundaries(student) : [];
+        const score = performanceDisplayMode === 'percentage' 
+          ? perc
+          : gradeToPoints(getGrade(perc, boundaries));
+
+        return {
+          date: new Date(m.assessment.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          score,
+          assessmentName: m.assessment.name,
+          subject: m.assessment.subject,
+          grade: getGrade(perc, boundaries)
+        };
+      });
+  }, [selectedStudentForPerformance, marks, assessments, performanceSubjectFilter, yearFilter, performanceDisplayMode, students, yearBoundaries]);
 
   const subjectTrendData = useMemo(() => {
     const relevantAssessments = assessments
@@ -1010,28 +1066,42 @@ export default function App() {
     return relevantAssessments.map(assessment => {
       // Only include marks where student actually sat the exam (not absent)
       const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id && !(m as any).absent);
-      const avg = assessmentMarks.length > 0
-        ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / assessmentMarks.length
-        : 0;
+      let avg = 0;
+      if (assessmentMarks.length > 0) {
+        if (performanceDisplayMode === 'percentage') {
+          avg = assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / assessmentMarks.length;
+        } else {
+          // Calculate points average
+          const points = assessmentMarks.map(m => {
+            const student = students.find(s => s.id === m.studentId);
+            const perc = (m.score / assessment.maxMarks) * 100;
+            const boundaries = student ? getStudentBoundaries(student) : [];
+            return gradeToPoints(getGrade(perc, boundaries));
+          });
+          avg = points.reduce((a, b) => a + b, 0) / points.length;
+        }
+      }
+
       return {
         date: assessment.date,
         name: assessment.name,
-        average: parseFloat(avg.toFixed(1)),
+        average: parseFloat(avg.toFixed(2)),
         subject: assessment.subject
       };
     });
-  }, [assessments, marks, yearFilter]);
+  }, [assessments, marks, yearFilter, performanceDisplayMode, students, yearBoundaries]);
 
   const groupPerformanceData = useMemo(() => {
     const relevantPerformances = performances.filter(p => 
       matchesYearFilter(p.student.yearGroup, yearFilter) && (p as any).hasData
     );
+    const dataKey = performanceDisplayMode === 'percentage' ? 'averagePercentage' : 'averagePoints';
     const groupMap: Record<string, { total: number, count: number }> = {};
     
     relevantPerformances.forEach(p => {
       const key = p.student.groupName || 'General';
       if (!groupMap[key]) groupMap[key] = { total: 0, count: 0 };
-      groupMap[key].total += p.averagePercentage;
+      groupMap[key].total += (p as any)[dataKey];
       groupMap[key].count += 1;
     });
 
@@ -1041,7 +1111,7 @@ export default function App() {
         average: data.total / data.count
       }))
       .sort((a, b) => b.average - a.average);
-  }, [performances, yearFilter]);
+  }, [performances, yearFilter, performanceDisplayMode]);
 
   const subjectPerformanceData = useMemo(() => {
     const currentYearAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
@@ -1051,22 +1121,35 @@ export default function App() {
         const a = currentYearAssessments.find(as => as.id === m.assessmentId);
         return a?.subject === subject && !(m as any).absent;
       });
-      const avg = subjectMarks.length > 0
-        ? subjectMarks.reduce((acc, m) => {
+      let avg = 0;
+      if (subjectMarks.length > 0) {
+        if (performanceDisplayMode === 'percentage') {
+          avg = subjectMarks.reduce((acc, m) => {
             const a = currentYearAssessments.find(as => as.id === m.assessmentId)!;
             return acc + (m.score / a.maxMarks) * 100;
-          }, 0) / subjectMarks.length
-        : 0;
+          }, 0) / subjectMarks.length;
+        } else {
+          const points = subjectMarks.map(m => {
+            const student = students.find(s => s.id === m.studentId);
+            const a = currentYearAssessments.find(as => as.id === m.assessmentId)!;
+            const perc = (m.score / a.maxMarks) * 100;
+            const boundaries = student ? getStudentBoundaries(student) : [];
+            return gradeToPoints(getGrade(perc, boundaries));
+          });
+          avg = points.reduce((a, b) => a + b, 0) / points.length;
+        }
+      }
       return {
         subject,
-        average: parseFloat(avg.toFixed(1)),
+        average: parseFloat(avg.toFixed(2)),
         count: subjectMarks.length
       };
     });
-  }, [assessments, marks, selectedAcademicYear]);
+  }, [assessments, marks, selectedAcademicYear, performanceDisplayMode, students, yearBoundaries]);
 
   const classPerformanceData = useMemo(() => {
     const yearGroups: YearGroup[] = [7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'];
+    const dataKey = performanceDisplayMode === 'percentage' ? 'averagePercentage' : 'averagePoints';
     return yearGroups
       .filter(y => matchesYearFilter(y, yearFilter))
       .map(year => {
@@ -1074,15 +1157,15 @@ export default function App() {
         p.student.yearGroup === year && (p as any).hasData
       );
       const avg = yearPerformances.length > 0 
-        ? yearPerformances.reduce((acc, p) => acc + p.averagePercentage, 0) / yearPerformances.length 
+        ? yearPerformances.reduce((acc, p) => acc + (p as any)[dataKey], 0) / yearPerformances.length 
         : 0;
       return {
         year: typeof year === 'number' ? `Year ${year}` : year,
-        average: parseFloat(avg.toFixed(1)),
+        average: parseFloat(avg.toFixed(2)),
         count: yearPerformances.length
       };
     }).filter(d => d.count > 0);
-  }, [performances]);
+  }, [performances, performanceDisplayMode, yearFilter]);
 
   const backupData = () => {
     const data = {
@@ -3038,6 +3121,18 @@ export default function App() {
                       ))}
                     </select>
                   </div>
+                  <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
+                    <TrendingUp className="w-4 h-4 text-slate-400" />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Display</span>
+                    <select 
+                      className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer min-w-[100px]"
+                      value={performanceDisplayMode}
+                      onChange={(e) => setPerformanceDisplayMode(e.target.value as 'percentage' | 'points')}
+                    >
+                      <option value="percentage">Percentage</option>
+                      <option value="points">Grade Points</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -3048,7 +3143,7 @@ export default function App() {
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Selected Average</p>
-                    <h4 className="text-xl font-bold text-slate-900">{performanceInsights?.average.toFixed(1) || '0.0'}%</h4>
+                    <h4 className="text-xl font-bold text-slate-900">{performanceInsights?.average.toFixed(performanceDisplayMode === 'points' ? 2 : 1)}{performanceInsights?.labelSuffix}</h4>
                   </div>
                 </div>
                 <div className="card p-4 flex items-center gap-4 bg-white">
@@ -3068,7 +3163,7 @@ export default function App() {
                   <div>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Most Improved</p>
                     <h4 className="text-xl font-bold text-slate-900 truncate max-w-[150px]">{performanceInsights?.mostImproved?.name || 'N/A'}</h4>
-                    <p className="text-[10px] text-amber-600 font-bold">+{performanceInsights?.mostImproved?.improvement.toFixed(1)}% Growth</p>
+                    <p className="text-[10px] text-amber-600 font-bold">+{performanceInsights?.mostImproved?.improvement.toFixed(1)}{performanceInsights?.labelSuffix} Growth</p>
                   </div>
                 </div>
               </div>
@@ -3099,7 +3194,7 @@ export default function App() {
                           </div>
                           <div className="flex flex-col items-end gap-1">
                             <span className="text-xs font-bold text-emerald-600 bg-white px-2 py-0.5 rounded-full border border-emerald-100">
-                              {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
+                              {(p as any).hasData ? (performanceDisplayMode === 'percentage' ? `${p.averagePercentage.toFixed(1)}%` : `${p.averagePoints.toFixed(2)} pts`) : '—'}
                             </span>
                             {(p as any).hasData && (
                               <span className="text-[10px] font-black text-slate-800 tracking-tighter">
@@ -3135,9 +3230,9 @@ export default function App() {
                               <p className="text-[10px] text-slate-500">{p.student.groupName}</p>
                             </div>
                           </div>
-                          <div className="flex flex-col items-end gap-1">
+                           <div className="flex flex-col items-end gap-1">
                             <span className="text-xs font-bold text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-100">
-                              {(p as any).hasData ? `${p.averagePercentage.toFixed(1)}%` : '—'}
+                              {(p as any).hasData ? (performanceDisplayMode === 'percentage' ? `${p.averagePercentage.toFixed(1)}%` : `${p.averagePoints.toFixed(2)} pts`) : '—'}
                             </span>
                             {(p as any).hasData && (
                               <span className="text-[10px] font-black text-slate-800 tracking-tighter">
@@ -3250,7 +3345,9 @@ export default function App() {
                       <div className="flex items-center gap-4">
                         <div className="flex items-center gap-1.5">
                           <div className="w-2 h-2 rounded-full bg-indigo-600"></div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Average Score %</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Average {performanceDisplayMode === 'percentage' ? 'Score %' : 'Points'}
+                          </span>
                         </div>
                       </div>
                     </h3>
@@ -3269,14 +3366,14 @@ export default function App() {
                             axisLine={false} 
                             tickLine={false} 
                             tick={{ fill: '#64748b', fontSize: 11 }} 
-                            domain={[0, 100]} 
-                            tickFormatter={(val) => `${val}%`}
+                            domain={[0, performanceDisplayMode === 'percentage' ? 100 : 10]} 
+                            tickFormatter={(val) => performanceDisplayMode === 'percentage' ? `${val}%` : `${val}`}
                           />
                           <Tooltip 
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                             labelStyle={{ fontWeight: 'bold', marginBottom: '4px', color: '#1e293b' }}
                             formatter={(value: number, name: string, props: any) => [
-                              <span key="val" className="font-bold text-indigo-600">{value}%</span>,
+                              <span key="val" className="font-bold text-indigo-600">{value}{performanceDisplayMode === 'percentage' ? '%' : ' pts'}</span>,
                               <div key="info" className="text-[10px] text-slate-500 mt-1">
                                 <p className="font-bold text-slate-700">{props.payload.name}</p>
                                 <p>{props.payload.subject}</p>
@@ -3322,10 +3419,11 @@ export default function App() {
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={subjectPerformanceData} layout="vertical">
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                            <XAxis type="number" domain={[0, 100]} hide />
+                            <XAxis type="number" domain={[0, performanceDisplayMode === 'percentage' ? 100 : 10]} hide />
                             <YAxis dataKey="subject" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} width={100} />
                             <Tooltip 
                               contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                              formatter={(val: number) => [`${val}${performanceDisplayMode === 'percentage' ? '%' : ' pts'}`, 'Average']}
                             />
                             <Bar dataKey="average" radius={[0, 4, 4, 0]} barSize={20}>
                               {subjectPerformanceData.map((entry, index) => (
@@ -3347,9 +3445,10 @@ export default function App() {
                           <BarChart data={groupPerformanceData}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                             <XAxis dataKey="group" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
-                            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} domain={[0, 100]} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} domain={[0, performanceDisplayMode === 'percentage' ? 100 : 10]} />
                             <Tooltip 
                               contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                              formatter={(val: number) => [`${val}${performanceDisplayMode === 'percentage' ? '%' : ' pts'}`, 'Average']}
                             />
                             <Bar dataKey="average" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={30} />
                           </BarChart>
