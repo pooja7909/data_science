@@ -4531,17 +4531,21 @@ export default function App() {
                     value={selectedSettingScope}
                     onChange={(e) => setSelectedSettingScope(e.target.value)}
                   >
-                    <optgroup label="Year Groups">
+                    <optgroup label="Core Year Groups">
                       {[7, 8, 9, '10 IGCSE', '11 IGCSE'].map(y => (
                         <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
                       ))}
-                      <option value="12 IB">Year 12 IB (Global)</option>
-                      <option value="12 IB HL">Year 12 IB (HL)</option>
-                      <option value="12 IB SL">Year 12 IB (SL)</option>
-                      <option value="13 IB">Year 13 IB (Global)</option>
-                      <option value="13 IB HL">Year 13 IB (HL)</option>
-                      <option value="13 IB SL">Year 13 IB (SL)</option>
-                      <option value="Graduated">Graduated</option>
+                      <option value="12 IB">Year 12 IB (General)</option>
+                      <option value="13 IB">Year 13 IB (General)</option>
+                    </optgroup>
+                    <optgroup label="IB Level-Specific Boundaries">
+                      <option value="12 IB HL">Year 12 IB HL (Higher Level)</option>
+                      <option value="12 IB SL">Year 12 IB SL (Standard Level)</option>
+                      <option value="13 IB HL">Year 13 IB HL (Higher Level)</option>
+                      <option value="13 IB SL">Year 13 IB SL (Standard Level)</option>
+                    </optgroup>
+                    <optgroup label="Special Groups">
+                      <option value="Graduated">Graduated / Alumni</option>
                     </optgroup>
                     <optgroup label="Individual Classes">
                       {groups
