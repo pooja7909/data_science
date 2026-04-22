@@ -96,7 +96,7 @@ const KS3_BOUNDARIES: GradeBoundary[] = [
   { grade: 'Above', minPercentage: 70 },
   { grade: 'At', minPercentage: 50 },
   { grade: 'Below', minPercentage: 40 },
-  { grade: 'Significantly below', minPercentage: 0 },
+  { grade: 'Significantly Below', minPercentage: 0 },
 ];
 
 const IGCSE_BOUNDARIES: GradeBoundary[] = [
@@ -248,6 +248,8 @@ export default function App() {
     isNew: boolean;
     notes: string;
   }>({ name: '', preferredName: '', yearGroup: 7 as YearGroup, groupName: '', isNew: false, notes: '' });
+
+  const [marksEntryMode, setMarksEntryMode] = useState<'score' | 'percentage' | 'grade'>('score');
 
   // Authentication & System State
   const [isSystemLoading, setIsSystemLoading] = useState(true);
@@ -2830,6 +2832,36 @@ export default function App() {
         assessmentId, 
         score: validatedScore 
       }]);
+    }
+  };
+
+  const handleUpdateMarkByPercentage = (studentId: string, assessmentId: string, percentage: number | null) => {
+    const assessment = assessments.find(a => a.id === assessmentId);
+    if (!assessment) return;
+    
+    if (percentage === null || isNaN(percentage)) {
+      handleUpdateMark(studentId, assessmentId, null);
+      return;
+    }
+    
+    const validatedPercentage = Math.min(100, Math.max(0, percentage));
+    const score = (validatedPercentage / 100) * assessment.maxMarks;
+    handleUpdateMark(studentId, assessmentId, score);
+  };
+
+  const handleUpdateMarkByGrade = (studentId: string, assessmentId: string, grade: string) => {
+    const assessment = assessments.find(a => a.id === assessmentId);
+    const student = students.find(s => s.id === studentId);
+    if (!assessment || !student) return;
+    
+    // Get applicable boundaries
+    const boundaries = assessment.boundaries || getStudentBoundaries(student);
+    const b = boundaries.find(b => b.grade === grade);
+    
+    if (b) {
+      // Set to the minPercentage of that grade (plus a tiny bit to avoid floating point boundary issues)
+      const score = ((b.minPercentage + 0.1) / 100) * assessment.maxMarks;
+      handleUpdateMark(studentId, assessmentId, score);
     }
   };
 
@@ -5417,6 +5449,24 @@ export default function App() {
                     </h4>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Entry:</span>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                          {(['score', 'percentage', 'grade'] as const).map(mode => (
+                            <button
+                              key={mode}
+                              onClick={() => setMarksEntryMode(mode)}
+                              className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase transition-all ${
+                                marksEntryMode === mode 
+                                  ? 'bg-white text-indigo-600 shadow-sm' 
+                                  : 'text-slate-400 hover:text-slate-600'
+                              }`}
+                            >
+                              {mode === 'score' ? 'Marks' : mode === 'percentage' ? '%' : 'Grade'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
                         <span className="text-[10px] text-slate-400 uppercase font-bold">Group:</span>
                         <select 
                           className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
@@ -5544,54 +5594,102 @@ export default function App() {
                                         ABS
                                       </button>
                                       <div className="flex flex-col gap-1 items-end">
-                                        <input 
-                                          type="number" 
-                                          placeholder="Score"
-                                          disabled={(mark as any)?.absent}
-                                          className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
-                                            (mark as any)?.absent
-                                              ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
-                                              : mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'
-                                          }`}
-                                          value={(mark as any)?.absent ? '' : (mark?.score ?? '')}
-                                          min="0"
-                                          max={assessment?.maxMarks || 100}
-                                          onChange={e => {
-                                            const val = e.target.value;
-                                            handleUpdateMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
-                                          }}
-                                        />
-                                        <div className="flex gap-1">
+                                        {marksEntryMode === 'score' && (
                                           <input 
                                             type="number" 
-                                            placeholder="Resit"
+                                            placeholder="Score"
                                             disabled={(mark as any)?.absent}
-                                            className={`w-14 px-1.5 py-0.5 border border-dashed rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                            className={`w-14 px-1.5 py-0.5 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
                                               (mark as any)?.absent
                                                 ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
-                                                : 'bg-indigo-50 border-indigo-200 placeholder-indigo-300'
+                                                : mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'
                                             }`}
-                                            value={(mark as any)?.absent ? '' : (mark?.resitScore ?? '')}
+                                            value={(mark as any)?.absent ? '' : (mark?.score ?? '')}
                                             min="0"
-                                            max={mark?.resitMaxMarks || assessment?.maxMarks || 100}
+                                            max={assessment?.maxMarks || 100}
                                             onChange={e => {
                                               const val = e.target.value;
-                                              handleUpdateResitMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                              handleUpdateMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
                                             }}
                                           />
-                                          <input 
-                                            type="number" 
-                                            placeholder="Max"
+                                        )}
+                                        {marksEntryMode === 'percentage' && (
+                                          <div className="relative">
+                                            <input 
+                                              type="number" 
+                                              placeholder="%"
+                                              disabled={(mark as any)?.absent}
+                                              className={`w-14 px-1.5 py-0.5 pr-4 border rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                                (mark as any)?.absent
+                                                  ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                                                  : mark === undefined ? 'bg-amber-50 border-amber-200 placeholder-amber-300' : 'bg-white border-slate-200'
+                                              }`}
+                                              value={(mark as any)?.absent ? '' : (mark ? Math.round((mark.score / (assessment?.maxMarks || 1)) * 100) : '')}
+                                              min="0"
+                                              max="100"
+                                              onChange={e => {
+                                                const val = e.target.value;
+                                                handleUpdateMarkByPercentage(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                              }}
+                                            />
+                                            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-slate-400">%</span>
+                                          </div>
+                                        )}
+                                        {marksEntryMode === 'grade' && (
+                                          <select
                                             disabled={(mark as any)?.absent}
-                                            className={`w-10 px-1 py-0.5 border border-slate-100 rounded text-[9px] outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-slate-500 font-bold`}
-                                            value={(mark as any)?.absent ? '' : (mark?.resitMaxMarks ?? '')}
-                                            min="1"
-                                            onChange={e => {
-                                              const val = e.target.value;
-                                              handleUpdateResitMax(student.id, showMarksModal, val === '' ? null : parseFloat(val));
-                                            }}
-                                          />
-                                        </div>
+                                            className={`w-28 px-1.5 py-0.5 border rounded text-[10px] font-bold outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                              (mark as any)?.absent
+                                                ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                                                : mark === undefined ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200 text-indigo-600'
+                                            }`}
+                                            value={(() => {
+                                               if (!mark) return '';
+                                               const boundaries = assessment?.boundaries || getStudentBoundaries(student);
+                                               return getGrade((mark.score / (assessment?.maxMarks || 1)) * 100, boundaries);
+                                            })()}
+                                            onChange={e => handleUpdateMarkByGrade(student.id, showMarksModal, e.target.value)}
+                                          >
+                                            <option value="">— Grade —</option>
+                                            {(assessment?.boundaries || getStudentBoundaries(student)).map(b => (
+                                              <option key={b.grade} value={b.grade}>{b.grade}</option>
+                                            ))}
+                                          </select>
+                                        )}
+                                        
+                                        {marksEntryMode !== 'grade' && (
+                                          <div className="flex gap-1">
+                                            <input 
+                                              type="number" 
+                                              placeholder="Resit"
+                                              disabled={(mark as any)?.absent}
+                                              className={`w-14 px-1.5 py-0.5 border border-dashed rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                                (mark as any)?.absent
+                                                  ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                                                  : 'bg-indigo-50 border-indigo-200 placeholder-indigo-300'
+                                              }`}
+                                              value={(mark as any)?.absent ? '' : (mark?.resitScore ?? '')}
+                                              min="0"
+                                              max={mark?.resitMaxMarks || assessment?.maxMarks || 100}
+                                              onChange={e => {
+                                                const val = e.target.value;
+                                                handleUpdateResitMark(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                              }}
+                                            />
+                                            <input 
+                                              type="number" 
+                                              placeholder="Max"
+                                              disabled={(mark as any)?.absent}
+                                              className={`w-10 px-1 py-0.5 border border-slate-100 rounded text-[9px] outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-slate-500 font-bold`}
+                                              value={(mark as any)?.absent ? '' : (mark?.resitMaxMarks ?? '')}
+                                              min="1"
+                                              onChange={e => {
+                                                const val = e.target.value;
+                                                handleUpdateResitMax(student.id, showMarksModal, val === '' ? null : parseFloat(val));
+                                              }}
+                                            />
+                                          </div>
+                                        )}
                                       </div>
                                       <span className={`text-[9px] font-bold w-7 text-right ${
                                         (mark as any)?.absent ? 'text-rose-400' : mark === undefined ? 'text-amber-400' : 'text-slate-400'
