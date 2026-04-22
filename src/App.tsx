@@ -199,6 +199,19 @@ export default function App() {
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [showMarksModal, setShowMarksModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    type?: 'danger' | 'warning';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
   const [importPreview, setImportPreview] = useState<{assessments: string[], students: number, marks: number, groups: string[]} | null>(null);
   const [importColumnSubjects, setImportColumnSubjects] = useState<Record<string, string>>({});
   const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string, sheetName?: string } | null>(null);
@@ -1297,7 +1310,14 @@ export default function App() {
           }
         } catch (err) {
           console.error("Restore error:", err);
-          alert('Invalid backup file');
+          setConfirmModal({
+            isOpen: true,
+            title: 'Import Error',
+            message: 'Invalid backup file. Please ensure you are uploading a valid JSON backup.',
+            onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+            confirmText: 'OK',
+            type: 'danger'
+          });
         }
       };
       reader.readAsText(file);
@@ -1307,103 +1327,135 @@ export default function App() {
   const handleYearTransition = async () => {
     const nextYear = getNextAcademicYear(selectedAcademicYear);
     if (!nextYear) {
-      alert("Cannot transition beyond the last supported academic year.");
+      setConfirmModal({
+        isOpen: true,
+        title: 'Cannot Transition',
+        message: 'Cannot transition beyond the last supported academic year.',
+        onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+        confirmText: 'OK',
+        type: 'warning'
+      });
       return;
     }
 
-    if (!window.confirm(`This will promote all students from ${selectedAcademicYear} to ${nextYear}. Students in Year 13 will be marked as Graduated. Continue?`)) {
-      return;
-    }
-
-    setSaveStatus('saving');
-
-    const currentStudents = students.filter(s => s.academicYear === selectedAcademicYear);
-    const currentGroups = groups.filter(g => g.academicYear === selectedAcademicYear);
-    const currentAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
-
-    if (currentStudents.length === 0 && currentGroups.length === 0 && currentAssessments.length === 0) {
-      alert(`No students, groups, or assessments found for ${selectedAcademicYear} to promote.`);
-      setSaveStatus('idle');
-      return;
-    }
-
-    const newStudentsList: Student[] = [...students];
-    const newGroupsList: Group[] = [...groups];
-    const newAssessmentsList: Assessment[] = [...assessments];
-
-    // Promote Groups
-    currentGroups.forEach(group => {
-      const nextYearGroup = getNextYearGroup(group.yearGroup);
-      if (nextYearGroup) {
-        const exists = groups.find(g => g.name === group.name && g.yearGroup === nextYearGroup && g.academicYear === nextYear);
-        if (!exists) {
-          newGroupsList.push({
-            id: Math.random().toString(36).substr(2, 9),
-            name: group.name,
-            yearGroup: nextYearGroup,
-            academicYear: nextYear
-          });
-        }
-      }
-    });
-
-    // Promote Students
-    currentStudents.forEach(student => {
-      const nextYearGroup = getNextYearGroup(student.yearGroup);
-      if (nextYearGroup) {
-        const exists = students.find(s => s.name === student.name && s.yearGroup === nextYearGroup && s.academicYear === nextYear);
-        if (!exists) {
-          newStudentsList.push({
-            id: Math.random().toString(36).substr(2, 9),
-            name: student.name,
-            yearGroup: nextYearGroup,
-            groupName: nextYearGroup === 'Graduated' ? `Class of ${selectedAcademicYear.split('-')[0]}` : student.groupName,
-            academicYear: nextYear
-          });
-        }
-      }
-    });
-
-    // Promote Assessments (Clone templates to the next year for the same year groups)
-    currentAssessments.forEach(assessment => {
-      const exists = assessments.find(a => 
-        a.name === assessment.name && 
-        a.yearGroup === assessment.yearGroup && 
-        a.academicYear === nextYear &&
-        a.subject === assessment.subject
-      );
-      if (!exists) {
-        // Increment date by 1 year
-        let nextDate = assessment.date;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Promote Year Groups',
+      message: `This will promote all students from ${selectedAcademicYear} to ${nextYear}. Students in Year 13 will be marked as Graduated. Ensure all results are final before proceeding.`,
+      confirmText: 'Promote All',
+      type: 'warning',
+      onConfirm: async () => {
         try {
-          const d = new Date(assessment.date);
-          d.setFullYear(d.getFullYear() + 1);
-          nextDate = d.toISOString().split('T')[0];
-        } catch (e) {
-          // Fallback to original date if parsing fails
-        }
+          setSaveStatus('saving');
+          const currentStudents = students.filter(s => s.academicYear === selectedAcademicYear);
+          const currentGroups = groups.filter(g => g.academicYear === selectedAcademicYear);
+          const currentAssessments = assessments.filter(a => a.academicYear === selectedAcademicYear);
 
-        newAssessmentsList.push({
-          ...assessment,
-          id: Math.random().toString(36).substr(2, 9),
-          academicYear: nextYear,
-          date: nextDate
-        });
+          if (currentStudents.length === 0 && currentGroups.length === 0 && currentAssessments.length === 0) {
+            setConfirmModal({
+              isOpen: true,
+              title: 'Nothing to Promote',
+              message: `No data found for ${selectedAcademicYear}.`,
+              onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+              confirmText: 'OK'
+            });
+            setSaveStatus('idle');
+            return;
+          }
+
+          const newStudentsList: Student[] = [...students];
+          const newGroupsList: Group[] = [...groups];
+          const newAssessmentsList: Assessment[] = [...assessments];
+
+          // Promote Groups
+          currentGroups.forEach(group => {
+            const nextYearGroup = getNextYearGroup(group.yearGroup);
+            if (nextYearGroup) {
+              const exists = groups.find(g => g.name === group.name && g.yearGroup === nextYearGroup && g.academicYear === nextYear);
+              if (!exists) {
+                newGroupsList.push({
+                  id: Math.random().toString(36).substr(2, 9),
+                  name: group.name,
+                  yearGroup: nextYearGroup,
+                  academicYear: nextYear
+                });
+              }
+            }
+          });
+
+          // Promote Students
+          currentStudents.forEach(student => {
+            const nextYearGroup = getNextYearGroup(student.yearGroup);
+            if (nextYearGroup) {
+              const exists = students.find(s => s.name === student.name && s.yearGroup === nextYearGroup && s.academicYear === nextYear);
+              if (!exists) {
+                newStudentsList.push({
+                  id: Math.random().toString(36).substr(2, 9),
+                  name: student.name,
+                  yearGroup: nextYearGroup,
+                  groupName: nextYearGroup === 'Graduated' ? `Class of ${selectedAcademicYear.split('-')[0]}` : student.groupName,
+                  academicYear: nextYear
+                });
+              }
+            }
+          });
+
+          // Promote Assessments (Clone templates to the next year for the same year groups)
+          currentAssessments.forEach(assessment => {
+            const exists = assessments.find(a => 
+              a.name === assessment.name && 
+              a.yearGroup === assessment.yearGroup && 
+              a.academicYear === nextYear &&
+              a.subject === assessment.subject
+            );
+            if (!exists) {
+              // Increment date by 1 year
+              let nextDate = assessment.date;
+              try {
+                const d = new Date(assessment.date);
+                d.setFullYear(d.getFullYear() + 1);
+                nextDate = d.toISOString().split('T')[0];
+              } catch (e) {
+                // Fallback to original date if parsing fails
+              }
+
+              newAssessmentsList.push({
+                ...assessment,
+                id: Math.random().toString(36).substr(2, 9),
+                academicYear: nextYear,
+                date: nextDate
+              });
+            }
+          });
+
+          setStudents(newStudentsList);
+          setGroups(newGroupsList);
+          setAssessments(newAssessmentsList);
+          
+          // Update filters to follow the cohort
+          const nextYG = getNextYearGroup(yearFilter as YearGroup);
+          if (nextYG) setYearFilter(nextYG);
+          
+          setSelectedAcademicYear(nextYear);
+          setSaveStatus('saved');
+          
+          setConfirmModal({
+            isOpen: true,
+            title: 'Transition Complete',
+            message: `Successfully promoted ${currentStudents.length} students, ${currentGroups.length} groups, and ${currentAssessments.length} assessment templates to ${nextYear}.`,
+            onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+            confirmText: 'Great!'
+          });
+
+          setTimeout(() => setSaveStatus('idle'), 3000);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (err) {
+           console.error(err);
+           setSaveStatus('idle');
+           setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
       }
     });
-
-    setStudents(newStudentsList);
-    setGroups(newGroupsList);
-    setAssessments(newAssessmentsList);
-    
-    // Update filters to follow the cohort
-    const nextYG = getNextYearGroup(yearFilter as YearGroup);
-    if (nextYG) setYearFilter(nextYG);
-    
-    setSelectedAcademicYear(nextYear);
-    setSaveStatus('saved');
-    alert(`Successfully promoted ${currentStudents.length} students, ${currentGroups.length} groups, and ${currentAssessments.length} assessment templates to ${nextYear}.`);
-    setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
   const handlePaperUpload = async (e: React.ChangeEvent<HTMLInputElement>, assessmentId: string) => {
@@ -1488,109 +1540,155 @@ export default function App() {
   };
 
   const handleDeleteStudent = async (studentId: string) => {
-    if (confirm('Are you sure you want to delete this student and all their marks?')) {
-      try {
-        setSaveStatus('saving');
-        const studentMarks = marks.filter(m => m.studentId === studentId);
-        await Promise.all([
-          deleteDoc(doc(db, 'students', studentId)),
-          ...studentMarks.map(m => deleteDoc(doc(db, 'marks', m.id)))
-        ]);
-        
-        setStudents(prev => prev.filter(s => s.id !== studentId));
-        setMarks(prev => prev.filter(m => m.studentId !== studentId));
-        
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 3000);
-      } catch (error) {
-        console.error("Failed to delete student:", error);
-        setSaveStatus('idle');
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Student',
+      message: 'Are you sure you want to delete this student and all their marks? This action cannot be undone.',
+      confirmText: 'Delete Student',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          setSaveStatus('saving');
+          const studentMarks = marks.filter(m => m.studentId === studentId);
+          await Promise.all([
+            deleteDoc(doc(db, 'students', studentId)),
+            ...studentMarks.map(m => deleteDoc(doc(db, 'marks', m.id)))
+          ]);
+          
+          setStudents(prev => prev.filter(s => s.id !== studentId));
+          setMarks(prev => prev.filter(m => m.studentId !== studentId));
+          if (selectedStudentId === studentId) {
+            setSelectedStudentId(null);
+          }
+          if (editingStudentId === studentId) {
+            setEditingStudentId(null);
+            setShowStudentModal(false);
+          }
+          
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 3000);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          console.error("Failed to delete student:", error);
+          setSaveStatus('idle');
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
       }
-    }
+    });
   };
 
   const handleDeleteClass = async (year: YearGroup, groupName: string) => {
-    if (confirm(`Are you sure you want to delete all students and data in ${groupName} (Year ${year})?`)) {
-      try {
-        setSaveStatus('saving');
-        const studentsToDelete = students.filter(s => 
-          String(s.yearGroup) === String(year) && 
-          s.groupName === groupName && 
-          s.academicYear === selectedAcademicYear
-        );
-        const studentIds = new Set(studentsToDelete.map(s => s.id));
-        const marksToDelete = marks.filter(m => studentIds.has(m.studentId));
-        const groupToDelete = groups.find(g => g.name === groupName && g.yearGroup === year && g.academicYear === selectedAcademicYear);
-        
-        const deletePromises = [
-          ...studentsToDelete.map(s => deleteDoc(doc(db, 'students', s.id))),
-          ...marksToDelete.map(m => deleteDoc(doc(db, 'marks', m.id)))
-        ];
-        
-        if (groupToDelete) {
-          deletePromises.push(deleteDoc(doc(db, 'groups', groupToDelete.id)));
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Class',
+      message: `Are you sure you want to delete all students and data in ${groupName} (Year ${year})? This action cannot be undone.`,
+      confirmText: 'Delete Everything',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          setSaveStatus('saving');
+          const studentsToDelete = students.filter(s => 
+            String(s.yearGroup) === String(year) && 
+            s.groupName === groupName && 
+            s.academicYear === selectedAcademicYear
+          );
+          const studentIds = new Set(studentsToDelete.map(s => s.id));
+          const marksToDelete = marks.filter(m => studentIds.has(m.studentId));
+          const groupToDelete = groups.find(g => g.name === groupName && g.yearGroup === year && g.academicYear === selectedAcademicYear);
+          
+          const deletePromises = [
+            ...studentsToDelete.map(s => deleteDoc(doc(db, 'students', s.id))),
+            ...marksToDelete.map(m => deleteDoc(doc(db, 'marks', m.id)))
+          ];
+          
+          if (groupToDelete) {
+            deletePromises.push(deleteDoc(doc(db, 'groups', groupToDelete.id)));
+          }
+          
+          await Promise.all(deletePromises);
+          
+          setStudents(prev => prev.filter(s => !studentIds.has(s.id)));
+          setMarks(prev => prev.filter(m => !studentIds.has(m.studentId)));
+          if (groupToDelete) {
+            setGroups(prev => prev.filter(g => g.id !== groupToDelete.id));
+          }
+          if (selectedStudentId && studentIds.has(selectedStudentId)) {
+            setSelectedStudentId(null);
+          }
+          
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 3000);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          console.error("Failed to delete class:", error);
+          setSaveStatus('idle');
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         }
-        
-        await Promise.all(deletePromises);
-        
-        setStudents(prev => prev.filter(s => !studentIds.has(s.id)));
-        setMarks(prev => prev.filter(m => !studentIds.has(m.studentId)));
-        if (groupToDelete) {
-          setGroups(prev => prev.filter(g => g.id !== groupToDelete.id));
-        }
-        
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 3000);
-      } catch (error) {
-        console.error("Failed to delete class:", error);
-        setSaveStatus('idle');
       }
-    }
+    });
   };
 
   const handleDeleteAssessment = async (assessmentId: string) => {
-    if (confirm('Are you sure you want to delete this assessment and all associated marks?')) {
-      try {
-        setSaveStatus('saving');
-        const assessmentMarks = marks.filter(m => m.assessmentId === assessmentId);
-        await Promise.all([
-          deleteDoc(doc(db, 'assessments', assessmentId)),
-          ...assessmentMarks.map(m => deleteDoc(doc(db, 'marks', m.id)))
-        ]);
-        
-        setAssessments(prev => prev.filter(a => a.id !== assessmentId));
-        setMarks(prev => prev.filter(m => m.assessmentId !== assessmentId));
-        
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 3000);
-      } catch (error) {
-        console.error("Failed to delete assessment:", error);
-        setSaveStatus('idle');
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Assessment',
+      message: 'Are you sure you want to delete this assessment and all associated marks? This cannot be undone.',
+      confirmText: 'Delete Assessment',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          setSaveStatus('saving');
+          const assessmentMarks = marks.filter(m => m.assessmentId === assessmentId);
+          await Promise.all([
+            deleteDoc(doc(db, 'assessments', assessmentId)),
+            ...assessmentMarks.map(m => deleteDoc(doc(db, 'marks', m.id)))
+          ]);
+          
+          setAssessments(prev => prev.filter(a => a.id !== assessmentId));
+          setMarks(prev => prev.filter(m => m.assessmentId !== assessmentId));
+          
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 3000);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          console.error("Failed to delete assessment:", error);
+          setSaveStatus('idle');
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
       }
-    }
+    });
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    if (confirm('Are you sure you want to delete this group? Students will remain but will be unassigned from this group.')) {
-      try {
-        setSaveStatus('saving');
-        const group = groups.find(g => g.id === groupId);
-        if (group) {
-          await deleteDoc(doc(db, 'groups', groupId));
-          setGroups(prev => prev.filter(g => g.id !== groupId));
-          
-          // Clear groupName for students in this group
-          const studentsToUpdate = students.filter(s => s.groupName === group.name && String(s.yearGroup) === String(group.yearGroup) && s.academicYear === group.academicYear);
-          await Promise.all(studentsToUpdate.map(s => updateDoc(doc(db, 'students', s.id), { groupName: '' })));
-          setStudents(prev => prev.map(s => studentsToUpdate.find(stu => stu.id === s.id) ? { ...s, groupName: '' } : s));
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Group',
+      message: 'Are you sure you want to delete this group? Students will remain but will be unassigned from this group.',
+      confirmText: 'Delete Group',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          setSaveStatus('saving');
+          const group = groups.find(g => g.id === groupId);
+          if (group) {
+            await deleteDoc(doc(db, 'groups', groupId));
+            setGroups(prev => prev.filter(g => g.id !== groupId));
+            
+            // Clear groupName for students in this group
+            const studentsToUpdate = students.filter(s => s.groupName === group.name && String(s.yearGroup) === String(group.yearGroup) && s.academicYear === group.academicYear);
+            await Promise.all(studentsToUpdate.map(s => updateDoc(doc(db, 'students', s.id), { groupName: '' })));
+            setStudents(prev => prev.map(s => studentsToUpdate.find(stu => stu.id === s.id) ? { ...s, groupName: '' } : s));
+          }
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 3000);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          console.error("Failed to delete group:", error);
+          setSaveStatus('idle');
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         }
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 3000);
-      } catch (error) {
-        console.error("Failed to delete group:", error);
-        setSaveStatus('idle');
       }
-    }
+    });
   };
 
   const handleBulkStudentImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1769,7 +1867,14 @@ export default function App() {
       }
 
       if (duplicateCount > 0) {
-        alert(`${duplicateCount} duplicate students were found and skipped (same name and group).`);
+        setConfirmModal({
+          isOpen: true,
+          title: 'Import Completed',
+          message: `${duplicateCount} duplicate students were found and skipped (same name and group).`,
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+          confirmText: 'OK',
+          type: 'warning'
+        });
       }
     };
 
@@ -1837,13 +1942,13 @@ export default function App() {
 
     // ── Sheet 1: Students ───────────────────────────────────────────────────
     const studentData = [
-      ['Surname', 'First Name', 'Preferred Name', 'Year', 'Group'],
-      ['Ahmed',   'Sarah',      'Sarah',          '7',    '7W'],
-      ['Brown',   'James',      'Jim',            '10',   '10A'],
-      ['Clarke',  'Emma',       'Emma',           '12',   '12B'],
+      ['Surname', 'Forename (Firstname)', 'Preferred Name', 'Year Group (NC)', 'Academic House', 'Year Group Code'],
+      ['Ahmed',   'Sarah',                'Sarah',          '8',               'Ruby',           '8x'],
+      ['Brown',   'James',                'Jim',            '10',              'Jade',           '10A'],
+      ['Clarke',  'Emma',                 'Emma',           '12',              'Topaz',          '12B'],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(studentData);
-    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 10 }];
+    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Students');
 
     // ── Sheet 2: Instructions ────────────────────────────────────────────────
@@ -1853,11 +1958,12 @@ export default function App() {
       ['Fill in one row per student.'],
       [''],
       ['COLUMN GUIDE'],
-      ['Surname',        'Student family name'],
-      ['First Name',     'Student legal first name'],
-      ['Preferred Name', 'Name the student prefers to be called'],
-      ['Year',           'Year group (e.g. 7, 8, 9, 10, 11, 12, 13)'],
-      ['Group',          'Class code e.g. 7W, 10A, 12B'],
+      ['Surname',             'Student family name'],
+      ['Forename (Firstname)', 'Student legal first name'],
+      ['Preferred Name',      'Name the student prefers to be called'],
+      ['Year Group (NC)',     'Year group (e.g. 7, 8, 9, 10, 11, 12, 13)'],
+      ['Academic House',      'Student house affiliation'],
+      ['Year Group Code',     'Class code e.g. 8x, 10A, 12B'],
       [''],
       ['TIPS'],
       ['• Delete the example rows before uploading.'],
@@ -1875,36 +1981,48 @@ export default function App() {
     const wb = XLSX.utils.book_new();
 
     // ── Sheet 1: Assessment Marks ─────────────────────
-    const headers = ['Surname', 'First Name', 'Preferred Name', 'Year Group', 'Group', 'Subject', 'Assessment Name', 'Score', 'Max Marks', 'Date'];
+    const headers = ['Surname', 'Forename (Firstname)', 'Preferred Name', 'Year Group (NC)', 'Academic House', 'Year Group Code', 'Subject', 'Assessment Name', 'Score', 'Max Marks', 'Date'];
     const data = [
       headers,
-      ['Ahmed',  'Sarah', 'Sarah', '7', '7W', 'Computer Science', 'Unit Test 1', 38, 50, '2024-01-15'],
-      ['Brown',  'James', 'Jim',   '7', '7W', 'Computer Science', 'Unit Test 1', 40, 50, '2024-01-15'],
+      ['Ahmed',  'Sarah', 'Sarah', '7', 'House A', '7W', 'Computer Science', 'Unit Test 1', 38, 50, '2024-01-15'],
+      ['Brown',  'James', 'Jim',   '7', 'House B', '7W', 'Computer Science', 'Unit Test 1', 40, 50, '2024-01-15'],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(data);
-    ws1['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+    ws1['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 15 }, { wch: 14 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Marks');
 
-    // ── Sheet 2: Instructions ────────────────────────────────────────────────
+    // ── Sheet 2: Student Details ──────────────────────
+    const studentHeaders = ['Surname', 'Forename (Firstname)', 'Preferred Name', 'Year Group (NC)', 'Academic House', 'Year Group Code'];
+    const studentData = [
+      studentHeaders,
+      ['Ahmed', 'Sarah', 'Sarah', '7', 'House A', '7W'],
+      ['Brown', 'James', 'Jim',   '7', 'House B', '7W'],
+      ['Charlie', 'Dave', 'Dave', '8', 'House C', '8X'],
+      ['Delta', 'Eve', 'Eve', '8', 'House D', '8Y'],
+    ];
+    const ws3 = XLSX.utils.aoa_to_sheet(studentData);
+    XLSX.utils.book_append_sheet(wb, ws3, 'Students');
+
+    // ── Sheet 3: Instructions ────────────────────────────────────────────────
     const instructions = [
       ['ASSESSMENT MARKS UPLOAD — INSTRUCTIONS'],
       [''],
       ['HOW TO USE THIS TEMPLATE'],
-      ['1.', 'Fill in one row per student per assessment.'],
-      ['2.', 'Surname, First Name, and Year Group are required.'],
-      ['3.', 'Assessment Name, Score, and Max Marks are used to record results.'],
+      ['1.', 'Fill in the "Marks" sheet to upload scores for existing or new students.'],
+      ['2.', 'Use the "Students" sheet to bulk-add students without marks.'],
+      ['3.', 'Surname, Forename (Firstname), and Year Group (NC) are essential.'],
+      ['4.', 'Year Group Code (e.g., 8x, 8y) identifies the specific class group.'],
       [''],
       ['COLUMN GUIDE'],
-      ['Surname',        'Student family name'],
-      ['First Name',     'Student legal first name'],
-      ['Preferred Name', 'Optional. Name the student prefers'],
-      ['Year Group',     '7, 8, 9, 10, 11, 12, 13'],
-      ['Group',          'Class code e.g. 7W, 10A'],
-      ['Subject',        'e.g. Computer Science'],
-      ['Assessment Name','Name of the test/exam'],
-      ['Score',          'The mark achieved'],
-      ['Max Marks',      'Total possible marks'],
-      ['Date',           'YYYY-MM-DD format'],
+      ['Surname',              'Student family name'],
+      ['Forename (Firstname)',   'Student legal first name'],
+      ['Preferred Name',       'Optional. Name the student prefers'],
+      ['Year Group (NC)',      'Numbers 7-9, or "10 IGCSE", "11 IGCSE", "12 IB", "13 IB"'],
+      ['Academic House',       'Optional housekeeping data'],
+      ['Year Group Code',      'Specific class code e.g. 8X, 8Y, 7W'],
+      ['Assessment Name',      'Name of the test/exam'],
+      ['Score',                'The mark achieved'],
+      ['Max Marks',            'Total possible marks'],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(instructions);
     ws2['!cols'] = [{ wch: 22 }, { wch: 75 }];
@@ -1921,25 +2039,71 @@ export default function App() {
     let fileName = files[0].name.replace(/\.[^/.]+$/, "");
     if (files.length > 1) fileName = "Multiple Files";
 
+    const normalizeKey = (key: string | number) => String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const findValue = (row: any, possibleKeys: string[]) => {
+      const rowKeys = Object.keys(row);
+      const normalizedPossible = possibleKeys.map(k => normalizeKey(k));
+      const foundKey = rowKeys.find(rk => normalizedPossible.includes(normalizeKey(rk)));
+      return foundKey ? row[foundKey] : undefined;
+    };
+
+    const getJsonDataFromSheet = (ws: any) => {
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+      const headerIndex = rows.findIndex(row => 
+        row.some(cell => {
+          if (!cell) return false;
+          const c = String(cell).toLowerCase();
+          return c.includes('surname') || c.includes('forename') || c.includes('student');
+        })
+      );
+      
+      if (headerIndex === -1) {
+        // Fallback to searching for ANY row with data
+        const firstDataIndex = rows.findIndex(row => row.some(cell => cell !== null && cell !== ''));
+        if (firstDataIndex === -1) return [];
+        
+        const headers = rows[firstDataIndex].map((h, i) => String(h || `Column_${i}`).trim());
+        const dataRows = rows.slice(firstDataIndex + 1);
+        return dataRows.filter(row => row.some(cell => cell !== null && cell !== '')).map(row => {
+          const obj: any = {};
+          headers.forEach((h, i) => { if (h) obj[h] = row[i]; });
+          return obj;
+        });
+      }
+
+      const headers = rows[headerIndex].map((h, i) => String(h || `__EMPTY_${i}`).trim());
+      const dataRows = rows.slice(headerIndex + 1);
+      return dataRows.filter(row => row.some(cell => cell !== null && cell !== '')).map(row => {
+        const obj: any = {};
+        headers.forEach((h, i) => { if (h) obj[h] = row[i]; });
+        return obj;
+      });
+    };
+
     const processData = (data: any[], sheetName?: string) => {
       if (data.length === 0) return;
 
       const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
-      const metadataHeaders = [
-        'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
-        'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname'
-      ].map(h => h.toLowerCase().replace(/[\s_]/g, ''));
+      const metadataKeysStripped = [
+        'studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname',
+        'surname', 'lastname', 'forename', 'firstname', 'forenamefirstname',
+        'yeargroup', 'year', 'yeargroupnc', 'groupname', 'group', 'class', 'yeargroupcode',
+        'academichouse', 'house', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
+        'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', 'sheetname'
+      ];
 
-      const hasAssessmentNameColumn = headers.some(h => h.toLowerCase().replace(/[\s_]/g, '') === 'assessmentname');
-      
-      const extraColumns = headers.filter(h => {
-        if (metadataHeaders.includes(h.toLowerCase().replace(/[\s_]/g, ''))) return false;
+      const scoreColumns = headers.filter(h => {
+        const nh = normalizeKey(h);
+        if (metadataKeysStripped.includes(nh)) return false;
+        if (nh.startsWith('empty')) return false; // Ignore __EMPTY_n columns
         
         return data.some((row: any) => {
           const val = row[h];
           return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
         });
       });
+      
+      const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
       
       setPendingImport({ data, fileName, sheetName });
       
@@ -1962,7 +2126,7 @@ export default function App() {
       setImportConfig({
         yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
         groupName: fileName,
-        assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
+        assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (scoreColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
         subject: SUBJECTS_BY_YEAR[(yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter][0],
         maxMarks: 100,
         date: new Date().toISOString().split('T')[0]
@@ -1975,60 +2139,21 @@ export default function App() {
     };
 
     for (const file of files) {
-      const fileExtension = file.name.split('.').pop()?.toLowerCase();
-      if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-        const data = await new Promise<ArrayBuffer>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (evt) => resolve(evt.target?.result as ArrayBuffer);
-          reader.readAsArrayBuffer(file);
-        });
-        const wb = XLSX.read(data, { type: 'array' });
-        wb.SheetNames.forEach(wsname => {
-          const ws = wb.Sheets[wsname];
-          const jsonData = XLSX.utils.sheet_to_json(ws, { defval: null });
-          if (jsonData.length > 0) {
-            jsonData.forEach((row: any) => {
-              row.__sheetName = wsname;
-            });
-            allData.push(...jsonData);
-          }
-        });
-      } else {
-        const data = await new Promise<any[]>((resolve) => {
-          Papa.parse(file, {
-            header: false,
-            skipEmptyLines: true,
-            complete: (results) => {
-              const rawData = results.data as any[][];
-              const headerIndex = rawData.findIndex(row => 
-                row.some(cell => {
-                  if (typeof cell !== 'string') return false;
-                  const c = cell.toLowerCase();
-                  return c.includes('surname') || c.includes('forename') || c.includes('student');
-                })
-              );
-              
-              if (headerIndex === -1) {
-                resolve([]);
-                return;
-              }
-
-              const headers = rawData[headerIndex];
-              const dataRows = rawData.slice(headerIndex + 1);
-              
-              const result = dataRows.map(row => {
-                const obj: any = {};
-                headers.forEach((h, i) => {
-                  obj[h] = row[i];
-                });
-                return obj;
-              });
-              resolve(result);
-            }
-          });
-        });
-        allData.push(...data);
-      }
+      const data = await new Promise<ArrayBuffer>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target?.result as ArrayBuffer);
+        reader.readAsArrayBuffer(file);
+      });
+      
+      const wb = XLSX.read(data, { type: 'array' });
+      wb.SheetNames.forEach(wsname => {
+        const ws = wb.Sheets[wsname];
+        const jsonData = getJsonDataFromSheet(ws);
+        if (jsonData.length > 0) {
+          jsonData.forEach((row: any) => { row.__sheetName = wsname; });
+          allData.push(...jsonData);
+        }
+      });
     }
     processData(allData, fileName);
   };
@@ -2056,7 +2181,7 @@ export default function App() {
       newGroups.push(group);
     }
 
-    const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s_]/g, '');
+    const normalizeKey = (key: string | number) => String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
     const findValue = (row: any, possibleKeys: string[]) => {
       const rowKeys = Object.keys(row);
       const normalizedPossible = possibleKeys.map(k => normalizeKey(k));
@@ -2129,11 +2254,12 @@ export default function App() {
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const metadataHeaders = [
       'studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname',
-      'surname', 'lastname', 'forename', 'firstname',
-      'yeargroup', 'year', 'groupname', 'group', 'class',
+      'surname', 'lastname', 'forename', 'firstname', 'forenamefirstname',
+      'yeargroup', 'year', 'yeargroupnc', 'groupname', 'group', 'class', 'yeargroupcode',
+      'academichouse', 'house',
       'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark', 'isnew', 'newstudent', 'latejoined',
-      'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname', '__empty'
-    ].map(h => normalizeKey(h));
+      'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', 'sheetname'
+    ];
 
     const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
     const scoreColumns: string[] = headers.filter(h => {
@@ -2154,7 +2280,7 @@ export default function App() {
       let studentNameRaw = findValue(row, ['studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname']);
       if (!studentNameRaw) {
         const surname = findValue(row, ['surname', 'lastname', 'last name', 'familyname']);
-        const forename = findValue(row, ['forename', 'firstname', 'first name', 'givenname', 'forename']);
+        const forename = findValue(row, ['forename', 'firstname', 'first name', 'forename firstname', 'givenname', 'forename']);
         if (surname || forename) {
           studentNameRaw = `${String(forename || '').trim()} ${String(surname || '').trim()}`.trim();
         }
@@ -2162,6 +2288,7 @@ export default function App() {
       if (!studentNameRaw) return;
       const studentName = String(studentNameRaw).trim();
       const preferredName = findValue(row, ['preferredname', 'preferred name', 'nickname']) || '';
+      const academicHouse = findValue(row, ['academichouse', 'academic house', 'house']) || '';
       const isNewRaw = findValue(row, ['isnew', 'newstudent', 'new', 'latejoined']);
       const isNew = isNewRaw !== undefined ? (String(isNewRaw).toLowerCase() === 'true' || String(isNewRaw).toLowerCase() === 'yes' || isNewRaw === 1 || String(isNewRaw).toLowerCase() === 'y') : false;
       const notesRaw = findValue(row, ['notes', 'comments', 'details', 'studentdetails']);
@@ -2170,10 +2297,10 @@ export default function App() {
       const rowSheetName = row.__sheetName || defaultSheetName;
 
       // Derive the year group: prefer the import config (set by user in the modal),
-      // but also accept the per-row Year Group cell as a cross-check.
+      // But also accept the per-row Year Group cell as a cross-check.
       // If the row's Year Group cell disagrees with the import config, trust the import config —
       // this protects against data-entry errors like "11 IGCSE", "12 IGCSE" appearing in a 10R sheet.
-      const rowYearGroupRaw = findValue(row, ['yeargroup', 'year group', 'year']);
+      const rowYearGroupRaw = findValue(row, ['yeargroup', 'year group', 'year', 'year group (nc)']);
       const rowYearGroup = (() => {
         if (!rowYearGroupRaw) return yearGroup;
         const s = String(rowYearGroupRaw).trim().toLowerCase();
@@ -2197,10 +2324,15 @@ export default function App() {
       // 1. The 'Group' or 'Class' column in the row data (most explicit — e.g. '10R', '10S', '7W')
       // 2. The sheet name (set as __sheetName on every row for Excel imports)
       // 3. The importConfig groupName (filename fallback for CSV imports)
-      const rowGroupCol = findValue(row, ['group', 'class', 'groupname']);
-      console.log('DEBUG: row keys:', Object.keys(row));
-      console.log('DEBUG: row:', row, 'rowGroupCol:', rowGroupCol);
-      const rowGroupName = rowGroupCol ? String(rowGroupCol).trim() : null;
+      const rowGroupCol = findValue(row, ['group', 'class', 'groupname', 'year group code', 'reg group', 'registration group', 'class code']);
+      const rowGroupNameCandidate = rowGroupCol ? String(rowGroupCol).trim() : null;
+      // If rowGroupName is just a number matching the year, and we have a descriptive sheet name, prefer the sheet name
+      // This handles cases where MIS exports generic year codes but descriptive sheet tabs
+      let rowGroupName = rowGroupNameCandidate;
+      const yearString = String(effectiveYearGroup).match(/\d+/)?.[0] || String(effectiveYearGroup);
+      if (rowGroupNameCandidate === yearString && rowSheetName && rowSheetName !== rowGroupNameCandidate) {
+        rowGroupName = null;
+      }
       const effectiveGroupName = rowGroupName || rowSheetName || groupName;
       console.log('DEBUG: effectiveGroupName:', effectiveGroupName);
 
@@ -2238,6 +2370,7 @@ export default function App() {
           id: Math.random().toString(36).substr(2, 9), 
           name: studentName, 
           preferredName: String(preferredName).trim(),
+          academicHouse: String(academicHouse).trim(),
           yearGroup: effectiveYearGroup,
           groupName: effectiveGroupName,
           academicYear: selectedAcademicYear,
@@ -2251,6 +2384,9 @@ export default function App() {
         }
         if (preferredName) {
           student.preferredName = String(preferredName).trim();
+        }
+        if (academicHouse) {
+          student.academicHouse = String(academicHouse).trim();
         }
         if (isNewRaw !== undefined) {
           student.isNew = isNew;
@@ -2433,14 +2569,22 @@ export default function App() {
 
     // Show summary alert
     const parts = [];
-    if (newStudentCount > 0) parts.push(`${newStudentCount} new student${newStudentCount > 1 ? 's' : ''}`);
+    if (newStudentCount > 0) {
+      parts.push(`${newStudentCount} new student${newStudentCount > 1 ? 's' : ''}`);
+    } else {
+      parts.push('Student records updated');
+    }
     if (newAssessmentCount > 0) parts.push(`${newAssessmentCount} new assessment${newAssessmentCount > 1 ? 's' : ''}`);
     if (newMarkCount > 0) parts.push(`${newMarkCount} mark${newMarkCount > 1 ? 's' : ''} added/updated`);
-    if (parts.length > 0) {
-      alert('Import complete: ' + parts.join(', ') + '.');
-    } else {
-      alert('Import complete — no new data detected. Check that student names match exactly and column headers include max marks e.g. "Test 1 (50)".');
-    }
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Import Successful',
+      message: 'Import complete: ' + parts.join(', ') + '.',
+      onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+      confirmText: 'Great',
+      type: 'info'
+    });
   };
 
   // Dry-run the import to show a preview of what will be created/updated
@@ -2449,19 +2593,30 @@ export default function App() {
     const { data } = pendingImport;
     const { yearGroup, subject: defaultSubject, maxMarks: defaultMaxMarks } = importConfig;
 
-    const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s_]/g, '');
+    const normalizeKey = (key: string | number) => String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const findValue = (row: any, possibleKeys: string[]) => {
+      const rowKeys = Object.keys(row);
+      const normalizedPossible = possibleKeys.map(k => normalizeKey(k));
+      const foundKey = rowKeys.find(rk => normalizedPossible.includes(normalizeKey(rk)));
+      return foundKey ? row[foundKey] : undefined;
+    };
+
     const metadataKeys = [
-      'studentname','name','student','fullname','pupil','pupilname',
-      'surname','lastname','forename','firstname',
-      'yeargroup','year','groupname','group','class',
-      'subject','subjects','level','iblevel','date','maxmarks','assessmentname','score','mark',
-      'upn','uln','gender','dob','sen','pp','fsm','eal','ethnicity','notes','comments',
-      'attendance','email','id','mis_id','__sheetname'
-    ].map(normalizeKey);
+      'studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname',
+      'surname', 'lastname', 'forename', 'firstname', 'forenamefirstname',
+      'yeargroup', 'year', 'yeargroupnc', 'groupname', 'group', 'class', 'yeargroupcode',
+      'academichouse', 'house',
+      'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
+      'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments',
+      'attendance', 'email', 'id', 'mis_id', 'sheetname'
+    ];
 
     const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const scoreColumns = headers.filter(h => {
-      if (metadataKeys.includes(normalizeKey(h))) return false;
+      const nh = normalizeKey(h);
+      if (metadataKeys.includes(nh)) return false;
+      if (nh.startsWith('empty')) return false; // Ignore __EMPTY_n columns
+      
       // Include column if it has numeric data OR if header contains "(N)" max-marks pattern
       // This catches assessment columns that are all-empty (e.g. not yet marked)
       if (/\(\d+\)/.test(h)) return true;
@@ -2489,34 +2644,38 @@ export default function App() {
         const matched = allSubjects.find(s => s.toLowerCase() === possSubj.toLowerCase());
         if (matched) subject = matched;
       }
-      return `\${name} (\${subject}, \${maxMarks} marks)`;
+      return `${name} (${subject}, ${maxMarks} marks)`;
     });
 
     const studentNames = new Set<string>();
     const detectedGroups = new Set<string>();
     let markCount = 0;
     data.forEach((row: any) => {
-      let nameRaw = ['studentname','name','student','fullname','pupil','pupilname']
-        .map(k => Object.keys(row).find(rk => normalizeKey(rk) === k))
-        .filter(Boolean).map(k => row[k!])[0];
+      let nameRaw = findValue(row, ['studentname', 'name', 'student', 'fullname', 'pupil', 'pupilname']);
       if (!nameRaw) {
-        const surnameKey = Object.keys(row).find(k => normalizeKey(k) === 'surname' || normalizeKey(k) === 'lastname');
-        const forenameKey = Object.keys(row).find(k => normalizeKey(k) === 'forename' || normalizeKey(k) === 'firstname');
-        if (surnameKey || forenameKey) {
-          nameRaw = `\${row[forenameKey||'']||''} \${row[surnameKey||'']||''}`.trim();
+        const surname = findValue(row, ['surname', 'lastname', 'last name', 'familyname']);
+        const forename = findValue(row, ['forename', 'firstname', 'first name', 'forename firstname', 'givenname', 'forename']);
+        if (surname || forename) {
+          nameRaw = `${String(forename || '').trim()} ${String(surname || '').trim()}`.trim();
         }
       }
       if (!nameRaw) return;
       studentNames.add(String(nameRaw).trim());
       // Detect group from the Group column or sheet name
-      const groupKey = Object.keys(row).find((k: string) => {
-        const nk = normalizeKey(k);
-        return nk === 'group' || nk === 'class' || nk === 'groupname';
-      });
-      const groupVal = groupKey ? String(row[groupKey]).trim() : (row.__sheetName ? String(row.__sheetName).trim() : '');
+      const groupFromCol = findValue(row, ['group', 'class', 'groupname', 'yeargroupcode', 'reggroup', 'registrationgroup', 'classcode', 'section']) || '';
+      const groupFromSheet = row.__sheetName ? String(row.__sheetName).trim() : '';
+      
+      // Smart group detection mirroring handleImport
+      let groupVal = String(groupFromCol).trim() || groupFromSheet;
+      const yearStrMatch = String(yearGroup).match(/\d+/);
+      const yearStr = yearStrMatch ? yearStrMatch[0] : String(yearGroup);
+      if (groupVal === yearStr && groupFromSheet && groupFromSheet !== groupVal && groupFromSheet !== 'Sheet1') {
+        groupVal = groupFromSheet;
+      }
+
       if (groupVal && groupVal !== 'null' && groupVal !== 'undefined') detectedGroups.add(groupVal);
-      scoreColumns.forEach(col => {
-        const v = row[col];
+      scoreColumns.forEach(id => {
+        const v = row[id];
         if (v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(String(v).trim()))) markCount++;
       });
     });
@@ -3764,6 +3923,17 @@ export default function App() {
                     Add Student
                   </button>
                   <button 
+                    onClick={() => {
+                      const fileInput = document.getElementById('student-file-upload');
+                      if (fileInput) fileInput.click();
+                    }}
+                    className="btn-secondary w-full flex items-center justify-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    Bulk Upload Students
+                    <input id="student-file-upload" type="file" accept=".csv,.xlsx,.xls" multiple onChange={handleFileUpload} className="hidden" />
+                  </button>
+                  <button 
                     onClick={downloadStudentTemplate}
                     className="btn-secondary w-full flex items-center justify-center gap-2"
                   >
@@ -3840,7 +4010,7 @@ export default function App() {
                               </div>
                               <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                 <select 
-                                  className="bg-transparent text-[8px] font-bold text-slate-400 uppercase tracking-tighter outline-none cursor-pointer hover:text-rose-500 transition-colors"
+                                  className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-tight outline-none cursor-pointer hover:border-rose-300 hover:text-rose-600 transition-all shadow-sm"
                                   defaultValue=""
                                   onChange={(e) => {
                                     const val = e.target.value;
@@ -3903,7 +4073,7 @@ export default function App() {
                                               <div
                                                 key={p.student.id}
                                                 onClick={() => setSelectedStudentId(p.student.id)}
-                                                className={`w-full cursor-pointer px-3 py-1.5 transition-colors flex items-center justify-between group ${
+                                                className={`w-full cursor-pointer px-3 py-1.5 transition-colors flex items-center justify-between group/student ${
                                                   selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
                                                 }`}
                                                 role="button"
@@ -3938,15 +4108,16 @@ export default function App() {
                                                       </span>
                                                     )}
                                                   </div>
-                                                  <button 
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleDeleteStudent(p.student.id);
-                                                    }}
-                                                    className="opacity-0 group-hover:opacity-100 p-0.5 text-rose-500"
-                                                  >
-                                                    <Trash2 className="w-2.5 h-2.5" />
-                                                  </button>
+                                                    <button 
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDeleteStudent(p.student.id);
+                                                      }}
+                                                      className={`p-0.5 text-rose-500 transition-all ${selectedStudentId === p.student.id ? 'opacity-100' : 'opacity-40 group-hover/student:opacity-70 hover:!opacity-100'}`}
+                                                      title="Delete student"
+                                                    >
+                                                      <Trash2 className="w-2.5 h-2.5" />
+                                                    </button>
                                                 </div>
                                               </div>
                                             ))}
@@ -3994,7 +4165,7 @@ export default function App() {
                                         <div
                                           key={p.student.id}
                                           onClick={() => setSelectedStudentId(p.student.id)}
-                                          className={`w-full cursor-pointer text-left px-3 py-1.5 transition-colors flex items-center justify-between group ${
+                                          className={`w-full cursor-pointer text-left px-3 py-1.5 transition-colors flex items-center justify-between group/student ${
                                             selectedStudentId === p.student.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
                                           }`}
                                           role="button"
@@ -4028,7 +4199,8 @@ export default function App() {
                                                 e.stopPropagation();
                                                 handleDeleteStudent(p.student.id);
                                               }}
-                                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-100 rounded text-rose-500 transition-opacity"
+                                              className={`p-1 hover:bg-rose-100 rounded text-rose-500 transition-all ${selectedStudentId === p.student.id ? 'opacity-100' : 'opacity-40 group-hover/student:opacity-70 hover:!opacity-100'}`}
+                                              title="Delete student"
                                             >
                                               <Trash2 className="w-3 h-3" />
                                             </button>
@@ -4095,6 +4267,14 @@ export default function App() {
                                 >
                                   <Edit2 className="w-3 h-3" />
                                   Edit Details
+                                </button>
+                                <div className="w-px h-3 bg-slate-200 mx-1" />
+                                <button 
+                                  onClick={() => handleDeleteStudent(p.student.id)}
+                                  className="text-xs font-bold text-rose-500 hover:text-rose-600 flex items-center gap-1"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  Delete Student
                                 </button>
                               </div>
                               <p className="text-slate-500 mt-2">
@@ -4254,21 +4434,34 @@ export default function App() {
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-slate-900">Assessments & Marks</h2>
-                <button 
-                  onClick={() => {
-                    const defaultYear = (yearFilter !== 'all' && yearFilter !== 'IGCSE_ALL' && yearFilter !== 'IB_ALL') ? yearFilter : newAssessment.yearGroup;
-                    setNewAssessment(prev => ({ 
-                      ...prev, 
-                      yearGroup: defaultYear,
-                      subject: prev.yearGroup === defaultYear ? prev.subject : SUBJECTS_BY_YEAR[defaultYear][0]
-                    }));
-                    setShowAssessmentModal(true);
-                  }}
-                  className="btn-primary flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  New Assessment
-                </button>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => {
+                      const fileInput = document.getElementById('assessment-file-upload');
+                      if (fileInput) fileInput.click();
+                    }}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    Upload Marks
+                    <input id="assessment-file-upload" type="file" accept=".csv,.xlsx,.xls" multiple onChange={handleFileUpload} className="hidden" />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const defaultYear = (yearFilter !== 'all' && yearFilter !== 'IGCSE_ALL' && yearFilter !== 'IB_ALL') ? yearFilter : newAssessment.yearGroup;
+                      setNewAssessment(prev => ({ 
+                        ...prev, 
+                        yearGroup: defaultYear,
+                        subject: prev.yearGroup === defaultYear ? prev.subject : SUBJECTS_BY_YEAR[defaultYear][0]
+                      }));
+                      setShowAssessmentModal(true);
+                    }}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    New Assessment
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 pb-2">
@@ -4354,11 +4547,7 @@ export default function App() {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => {
-                            if (window.confirm(`Delete "${assessment.name}"? This will also remove all ${marks.filter(m => m.assessmentId === assessment.id).length} marks for this assessment. This cannot be undone.`)) {
-                              handleDeleteAssessment(assessment.id);
-                            }
-                          }}
+                          onClick={() => handleDeleteAssessment(assessment.id)}
                           className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
                           title="Delete Assessment"
                         >
@@ -4814,7 +5003,7 @@ export default function App() {
                   <div className="mt-6 p-4 bg-white rounded-xl border border-indigo-100">
                     <h4 className="text-xs font-bold text-indigo-900 uppercase tracking-wider mb-2 text-center">Expected CSV Headers:</h4>
                     <div className="flex flex-wrap justify-center gap-2">
-                      {['studentName', 'yearGroup', 'groupName', 'assessmentName', 'subject', 'score', 'maxMarks', 'date'].map(header => (
+                      {['Surname', 'Forename (Firstname)', 'Preferred Name', 'Year Group (NC)', 'Year Group Code', 'Assessment Name', 'Score', 'Max Marks'].map(header => (
                         <span key={header} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-mono text-slate-600 border border-slate-200">
                           {header}
                         </span>
@@ -5170,6 +5359,16 @@ export default function App() {
 
               <div className="p-6 border-t border-slate-100 flex-shrink-0 bg-white">
                 <div className="flex gap-3">
+                  {editingStudentId && (
+                    <button 
+                      type="button" 
+                      onClick={() => handleDeleteStudent(editingStudentId)} 
+                      className="px-4 py-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors border border-rose-100 flex items-center justify-center gap-2 text-xs font-bold"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete Student
+                    </button>
+                  )}
                   <button 
                     type="button" 
                     onClick={() => {
@@ -5177,11 +5376,11 @@ export default function App() {
                       setEditingStudentId(null);
                       setNewStudent(prev => ({ ...prev, name: '', preferredName: '' }));
                     }} 
-                    className="btn-secondary flex-1"
+                    className={`btn-secondary flex-1 ${editingStudentId ? 'flex-[1.5]' : ''}`}
                   >
                     Cancel
                   </button>
-                  <button form="student-form" type="submit" className="btn-primary flex-1">
+                  <button form="student-form" type="submit" className="btn-primary flex-[2]">
                     {editingStudentId ? 'Save Changes' : 'Add Student'}
                   </button>
                 </div>
@@ -5818,54 +6017,59 @@ export default function App() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Assessment Name</label>
-                  <input 
-                    type="text"
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
-                    value={importConfig.assessmentName}
-                    onChange={e => setImportConfig({ ...importConfig, assessmentName: e.target.value })}
-                    placeholder="e.g. End of Term Test"
-                    disabled={importConfig.assessmentName.includes('Multiple')}
-                  />
-                  {importConfig.assessmentName.includes('Multiple') && (
-                    <p className="text-[10px] text-indigo-600 mt-1 font-medium">
-                      ✨ Multi-assessment detected! The system will use names from your CSV.
-                    </p>
-                  )}
-                </div>
+                {/* Assessment Config — Hide if simple classlist detected */}
+                {importPreview && importPreview.marks > 0 && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Assessment Name</label>
+                      <input 
+                        type="text"
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
+                        value={importConfig.assessmentName}
+                        onChange={e => setImportConfig({ ...importConfig, assessmentName: e.target.value })}
+                        placeholder="e.g. End of Term Test"
+                        disabled={importConfig.assessmentName.includes('Multiple')}
+                      />
+                      {importConfig.assessmentName.includes('Multiple') && (
+                        <p className="text-[10px] text-indigo-600 mt-1 font-medium">
+                          ✨ Multi-assessment detected! The system will use names from your CSV.
+                        </p>
+                      )}
+                    </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Subject</label>
-                    <select 
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
-                      value={importConfig.subject}
-                      onChange={e => setImportConfig({ ...importConfig, subject: e.target.value })}
-                    >
-                      {SUBJECTS_BY_YEAR[importConfig.yearGroup].map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Max Marks</label>
-                    <input 
-                      type="number"
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
-                      value={importConfig.maxMarks}
-                      onChange={e => setImportConfig({ ...importConfig, maxMarks: parseInt(e.target.value) })}
-                    />
-                  </div>
-                </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Subject</label>
+                        <select 
+                          className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
+                          value={importConfig.subject}
+                          onChange={e => setImportConfig({ ...importConfig, subject: e.target.value })}
+                        >
+                          {SUBJECTS_BY_YEAR[importConfig.yearGroup].map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Max Marks</label>
+                        <input 
+                          type="number"
+                          className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
+                          value={importConfig.maxMarks}
+                          onChange={e => setImportConfig({ ...importConfig, maxMarks: parseInt(e.target.value) })}
+                        />
+                      </div>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Date</label>
-                  <input 
-                    type="date"
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
-                    value={importConfig.date}
-                    onChange={e => setImportConfig({ ...importConfig, date: e.target.value })}
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Date</label>
+                      <input 
+                        type="date"
+                        className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
+                        value={importConfig.date}
+                        onChange={e => setImportConfig({ ...importConfig, date: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
 
                 {/* Preview panel */}
                 {importPreview && (
@@ -5877,8 +6081,19 @@ export default function App() {
                         <p className="text-[10px] text-slate-500">Students</p>
                       </div>
                       <div className="bg-white rounded-lg p-2 border border-indigo-100">
-                        <p className="text-lg font-bold text-indigo-600">{importPreview.marks}</p>
-                        <p className="text-[10px] text-slate-500">Marks</p>
+                        {importPreview.marks > 0 ? (
+                          <>
+                            <p className="text-lg font-bold text-indigo-600">{importPreview.marks}</p>
+                            <p className="text-[10px] text-slate-500">Marks Found</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-lg font-bold text-emerald-500 flex items-center justify-center">
+                              <CheckCircle2 className="w-5 h-5" />
+                            </p>
+                            <p className="text-[9px] text-emerald-600 font-bold uppercase tracking-tighter">Classlist Mode</p>
+                          </>
+                        )}
                       </div>
                     </div>
                     {importPreview.groups && importPreview.groups.length > 0 && (
@@ -5962,13 +6177,45 @@ export default function App() {
                     className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     disabled={
                       !importPreview ||
-                      Object.keys(importColumnSubjects).length === 0 ||
-                      Object.values(importColumnSubjects).some(s => !s)
+                      importPreview.students === 0 ||
+                      (Object.keys(importColumnSubjects).length > 0 && Object.values(importColumnSubjects).some(s => !s))
                     }
                   >
                     Import
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center"
+            >
+              <div className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center mb-4 ${confirmModal.type === 'danger' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
+                <AlertCircle className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">{confirmModal.title}</h3>
+              <p className="text-sm text-slate-500 mb-8 leading-relaxed">{confirmModal.message}</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                  className="btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmModal.onConfirm}
+                  className={`flex-1 py-2 px-4 rounded-xl text-sm font-bold text-white transition-all shadow-lg active:scale-95 ${confirmModal.type === 'danger' ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-200' : 'bg-amber-600 hover:bg-amber-700 shadow-amber-200'}`}
+                >
+                  {confirmModal.confirmText || 'Confirm'}
+                </button>
               </div>
             </motion.div>
           </div>
