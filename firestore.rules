@@ -1,8 +1,120 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+    // 0. Global Safety Net
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitive Definition
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isOwner(data) { 
+      return isSignedIn() && (
+        data.teacherId == request.auth.uid || 
+        // Migration: Allow claiming documents that were created without a teacherId
+        !data.keys().hasAll(['teacherId'])
+      ); 
+    }
+    function isDocOwner(docId) { return isSignedIn() && docId == request.auth.uid; }
+
+    // Pillar 2: Validation Blueprints
+    function isValidStudent(data) {
+      return data.keys().hasAll(['teacherId', 'name', 'yearGroup', 'groupName', 'academicYear'])
+        && data.teacherId == request.auth.uid
+        && data.name is string && data.name.size() <= 300
+        && (data.yearGroup is string || data.yearGroup is number)
+        && data.groupName is string && data.groupName.size() <= 100
+        && data.academicYear is string && data.academicYear.size() <= 20;
+    }
+
+    function isValidGroup(data) {
+      return data.keys().hasAll(['teacherId', 'yearGroup', 'name', 'academicYear'])
+        && data.teacherId == request.auth.uid
+        && (data.yearGroup is string || data.yearGroup is number)
+        && data.name is string && data.name.size() <= 100
+        && data.academicYear is string && data.academicYear.size() <= 20;
+    }
+
+    function isValidAssessment(data) {
+      return data.keys().hasAll(['teacherId', 'name', 'subject', 'maxMarks', 'yearGroup', 'academicYear', 'date'])
+        && data.teacherId == request.auth.uid
+        && data.name is string && data.name.size() <= 300
+        && data.subject is string && data.subject.size() <= 150
+        && data.maxMarks is number && data.maxMarks >= 0
+        && (data.yearGroup is string || data.yearGroup is number)
+        && data.academicYear is string && data.academicYear.size() <= 20;
+    }
+
+    function isValidMark(data) {
+      return data.keys().hasAll(['teacherId', 'studentId', 'assessmentId', 'score'])
+        && data.teacherId == request.auth.uid
+        && isValidId(data.studentId)
+        && isValidId(data.assessmentId)
+        && data.score is number;
+    }
+
+    // Match Blocks
+    match /students/{studentId} {
+      allow list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow get: if isOwner(existing());
+      allow create: if isSignedIn() && isValidStudent(incoming());
+      allow update: if isOwner(existing()) && isValidStudent(incoming())
+        && (
+          !existing().keys().hasAll(['teacherId']) || 
+          incoming().teacherId == existing().teacherId
+        );
+      allow delete: if isOwner(existing());
+    }
+
+    match /groups/{groupId} {
+      allow list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow get: if isOwner(existing());
+      allow create: if isSignedIn() && isValidGroup(incoming());
+      allow update: if isOwner(existing()) && isValidGroup(incoming())
+        && (
+          !existing().keys().hasAll(['teacherId']) || 
+          incoming().teacherId == existing().teacherId
+        );
+      allow delete: if isOwner(existing());
+    }
+
+    match /assessments/{assessmentId} {
+      allow list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow get: if isOwner(existing());
+      allow create: if isSignedIn() && isValidAssessment(incoming());
+      allow update: if isOwner(existing()) && isValidAssessment(incoming())
+        && (
+          !existing().keys().hasAll(['teacherId']) || 
+          incoming().teacherId == existing().teacherId
+        );
+      allow delete: if isOwner(existing());
+    }
+
+    match /marks/{markId} {
+      allow list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow get: if isOwner(existing());
+      allow create: if isSignedIn() && isValidMark(incoming());
+      // exists() checks removed from create to handle concurrent bulk sync race conditions
+      allow update: if isOwner(existing()) && isValidMark(incoming())
+        && (
+          !existing().keys().hasAll(['teacherId']) || 
+          incoming().teacherId == existing().teacherId
+        )
+        && incoming().studentId == existing().studentId
+        && incoming().assessmentId == existing().assessmentId;
+      allow delete: if isOwner(existing());
+    }
+
+    match /config/{userId} {
+      // Config documents are identified by userId
+      allow read: if isDocOwner(userId);
+      allow write: if isDocOwner(userId);
     }
   }
 }
