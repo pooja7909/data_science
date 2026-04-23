@@ -198,6 +198,7 @@ export default function App() {
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [showMarksModal, setShowMarksModal] = useState<string | null>(null);
+  const [showBoundaryShare, setShowBoundaryShare] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -379,6 +380,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (showBoundaryShare) { setShowBoundaryShare(null); return; }
       if (showMarksModal) { setShowMarksModal(null); return; }
       if (showPaperGradingModal) { setShowPaperGradingModal(null); return; }
       if (showAssessmentModal) { setShowAssessmentModal(false); setEditingAssessmentId(null); return; }
@@ -387,7 +389,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showMarksModal, showPaperGradingModal, showAssessmentModal, showStudentModal, showImportModal]);
+  }, [showMarksModal, showPaperGradingModal, showAssessmentModal, showStudentModal, showImportModal, showBoundaryShare]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -418,11 +420,23 @@ export default function App() {
         // Initialize state with recovered data if available
         if (localData['science-tracker-students'] || localData['marks-data-students'] || localData['students']) {
           const s = localData['science-tracker-students'] || localData['marks-data-students'] || localData['students'];
-          if (Array.isArray(s)) setStudents(s);
+          if (Array.isArray(s)) {
+            // Ensure all recovered students have an academic year
+            setStudents(s.map(student => ({
+              ...student,
+              academicYear: student.academicYear || selectedAcademicYear || CURRENT_ACADEMIC_YEAR
+            })));
+          }
         }
         if (localData['science-tracker-assessments'] || localData['marks-data-assessments'] || localData['assessments']) {
           const a = localData['science-tracker-assessments'] || localData['marks-data-assessments'] || localData['assessments'];
-          if (Array.isArray(a)) setAssessments(a);
+          if (Array.isArray(a)) {
+            // Ensure all recovered assessments have an academic year
+            setAssessments(a.map(assessment => ({
+              ...assessment,
+              academicYear: assessment.academicYear || selectedAcademicYear || CURRENT_ACADEMIC_YEAR
+            })));
+          }
         }
         if (localData['science-tracker-marks'] || localData['marks-data-marks'] || localData['marks']) {
           const m = localData['science-tracker-marks'] || localData['marks-data-marks'] || localData['marks'];
@@ -430,7 +444,13 @@ export default function App() {
         }
         if (localData['science-tracker-groups'] || localData['marks-data-groups'] || localData['groups']) {
           const g = localData['science-tracker-groups'] || localData['marks-data-groups'] || localData['groups'];
-          if (Array.isArray(g)) setGroups(g);
+          if (Array.isArray(g)) {
+            // Ensure all recovered groups have an academic year
+            setGroups(g.map(group => ({
+              ...group,
+              academicYear: group.academicYear || selectedAcademicYear || CURRENT_ACADEMIC_YEAR
+            })));
+          }
         }
         if (localData['science-tracker-boundaries'] || localData['yearBoundaries']) {
           const b = localData['science-tracker-boundaries'] || localData['yearBoundaries'];
@@ -508,16 +528,22 @@ export default function App() {
           await Promise.all([
             ...students.map(s => setDoc(doc(db, 'students', s.id), cleanFirestoreData({
               ...s,
-              yearGroup: migrateYear(s.yearGroup)
+              yearGroup: migrateYear(s.yearGroup),
+              teacherId: auth.currentUser?.uid
             }))),
             ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), cleanFirestoreData({
               ...a,
-              yearGroup: migrateYear(a.yearGroup)
+              yearGroup: migrateYear(a.yearGroup),
+              teacherId: auth.currentUser?.uid
             }))),
-            ...marks.map(m => setDoc(doc(db, 'marks', m.id), cleanFirestoreData(m))),
+            ...marks.map(m => setDoc(doc(db, 'marks', m.id), cleanFirestoreData({
+              ...m,
+              teacherId: auth.currentUser?.uid
+            }))),
             ...groups.map(g => setDoc(doc(db, 'groups', g.id), cleanFirestoreData({
               ...g,
-              yearGroup: migrateYear(g.yearGroup)
+              yearGroup: migrateYear(g.yearGroup),
+              teacherId: auth.currentUser?.uid
             }))),
             updateYearBoundaries(yearBoundaries)
           ]);
@@ -4732,7 +4758,17 @@ export default function App() {
 
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-900 mb-2">Grade Boundaries</h2>
+                  <div className="flex items-center gap-3 mb-2">
+                    <h2 className="text-2xl font-bold text-slate-900 font-display">Grade Boundaries</h2>
+                    <button 
+                      onClick={() => setShowBoundaryShare(selectedSettingScope)}
+                      className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100 flex items-center gap-1.5"
+                      title="Generate shareable version"
+                    >
+                      <Plus className="w-4 h-4 rotate-45" /> {/* Use plus rotated as icon or similar */}
+                      <span className="text-[10px] uppercase font-bold tracking-wider">Share</span>
+                    </button>
+                  </div>
                   <p className="text-slate-500">Define the minimum percentage required for each grade level.</p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -5715,9 +5751,18 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex flex-col overflow-hidden">
-                  <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                    <Settings className="w-4 h-4" /> Assessment Boundaries
-                  </h4>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                      <Settings className="w-4 h-4" /> Assessment Boundaries
+                    </h4>
+                    <button 
+                      onClick={() => setShowBoundaryShare(showMarksModal)}
+                      className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100 flex items-center gap-1.5"
+                    >
+                      <Plus className="w-3.5 h-3.5 rotate-45" /> 
+                      <span className="text-[10px] uppercase font-bold tracking-wider">Share</span>
+                    </button>
+                  </div>
                   <div className="flex-1 overflow-y-auto pr-2 space-y-4">
                     <p className="text-xs text-slate-500 italic">
                       Custom boundaries for this assessment. If not set, class defaults will be used.
@@ -6287,6 +6332,89 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {showBoundaryShare && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-sm"
+            >
+              <div 
+                className="bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-slate-100 max-h-[90vh] flex flex-col"
+                id="grade-boundary-card"
+              >
+                <div className="bg-indigo-600 p-8 text-white text-center flex-shrink-0">
+                  <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
+                    <TrendingUp className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="text-xl font-black uppercase tracking-tight">Grade Boundaries</h3>
+                  <p className="text-indigo-100 text-xs font-medium mt-1">
+                    {(() => {
+                      const assessment = assessments.find(a => a.id === showBoundaryShare);
+                      if (assessment) return `${assessment.name} • ${formatYearGroup(assessment.yearGroup)}`;
+                      return `Year Group: ${showBoundaryShare}`;
+                    })()}
+                  </p>
+                </div>
+                
+                <div className="p-8 overflow-y-auto flex-1">
+                  <div className="space-y-3">
+                    {(() => {
+                      const assessment = assessments.find(a => a.id === showBoundaryShare);
+                      const boundaries = (assessment?.boundaries || yearBoundaries[showBoundaryShare!] || yearBoundaries[assessment?.yearGroup || 7] || [])
+                        .sort((a, b) => b.minPercentage - a.minPercentage);
+                        
+                      return boundaries.map((b, i) => (
+                        <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 transition-transform hover:scale-[1.02]">
+                          <span className="font-black text-slate-900 text-lg">{b.grade}</span>
+                          <div className="text-right">
+                            <span className="block text-indigo-600 font-black text-xl">{b.minPercentage}%</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Minimum</span>
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                  
+                  <div className="mt-8 flex flex-col gap-3">
+                    <button 
+                      onClick={() => {
+                        try {
+                          const assessment = assessments.find(a => a.id === showBoundaryShare);
+                          const boundaries = (assessment?.boundaries || yearBoundaries[showBoundaryShare!] || yearBoundaries[assessment?.yearGroup || 7] || [])
+                            .sort((a, b) => b.minPercentage - a.minPercentage);
+                          
+                          const text = boundaries.map(b => `${b.grade}: ${b.minPercentage}%`).join('\n');
+                          navigator.clipboard.writeText(text);
+                        } catch (err) {
+                          console.error('Clipboard failed', err);
+                        }
+                      }}
+                      className="w-full py-4 bg-indigo-50 text-indigo-700 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      Copy as Text
+                    </button>
+                    <button 
+                      onClick={() => setShowBoundaryShare(null)} 
+                      className="w-full py-4 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors"
+                    >
+                      Close Card
+                    </button>
+                  </div>
+                  
+                  <p className="mt-6 text-[10px] text-slate-300 text-center font-medium italic">
+                    Science Progress Tracker • {selectedAcademicYear}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {confirmModal.isOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -6321,7 +6449,7 @@ export default function App() {
       </AnimatePresence>
       <footer className="bg-white border-t border-slate-200 py-6 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-sm text-slate-500">© {new Date().getFullYear()} Pooja Arora - Computing Department</p>
+          <p className="text-sm text-slate-500">© {new Date().getFullYear()} Pooja Arora. All rights reserved.</p>
         </div>
       </footer>
     </div>
