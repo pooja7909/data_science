@@ -2,18 +2,21 @@ export type YearGroup = 7 | 8 | 9 | '10 IGCSE' | '11 IGCSE' | '12 IB' | '13 IB' 
 
 export interface Student {
   id: string;
+  teacherId?: string;
   name: string;
   preferredName?: string;
   yearGroup: YearGroup;
   groupName: string;
   academicYear: string;
   ibLevel?: 'HL' | 'SL';
+  academicHouse?: string;
   isNew?: boolean;
   notes?: string;
 }
 
 export interface Group {
   id: string;
+  teacherId?: string;
   yearGroup: YearGroup;
   name: string;
   academicYear: string;
@@ -26,6 +29,7 @@ export interface Question {
 
 export interface Assessment {
   id: string;
+  teacherId?: string;
   name: string;
   subject: string;
   date: string;
@@ -35,10 +39,12 @@ export interface Assessment {
   ibLevel?: 'HL' | 'SL' | 'Both';
   boundaries?: GradeBoundary[];
   questions?: Question[];
+  isLocked?: boolean;
 }
 
 export interface Mark {
   id: string;
+  teacherId?: string;
   studentId: string;
   assessmentId: string;
   score: number;
