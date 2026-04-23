@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, query, where, getDoc } from 'firebase/firestore';
 import { Student, Assessment, Mark, Group, GradeBoundary } from '../types';
 import { auth } from '../firebase';
 
@@ -58,16 +58,22 @@ export { doc, setDoc };
 
 export const getStudents = async () => {
   try {
-    const snapshot = await getDocs(collection(db, 'students'));
+    if (!auth.currentUser) return [];
+    const q = query(collection(db, 'students'), where('teacherId', '==', auth.currentUser.uid));
+    const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'students');
   }
 };
 
-export const addStudent = async (student: Omit<Student, 'id'>) => {
+export const addStudent = async (student: Omit<Student, 'id' | 'teacherId'>) => {
   try {
-    return await addDoc(collection(db, 'students'), student);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    return await addDoc(collection(db, 'students'), {
+      ...student,
+      teacherId: auth.currentUser.uid
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'students');
   }
@@ -91,16 +97,22 @@ export const deleteStudent = async (id: string) => {
 
 export const getAssessments = async () => {
   try {
-    const snapshot = await getDocs(collection(db, 'assessments'));
+    if (!auth.currentUser) return [];
+    const q = query(collection(db, 'assessments'), where('teacherId', '==', auth.currentUser.uid));
+    const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Assessment));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'assessments');
   }
 };
 
-export const addAssessment = async (assessment: Omit<Assessment, 'id'>) => {
+export const addAssessment = async (assessment: Omit<Assessment, 'id' | 'teacherId'>) => {
   try {
-    return await addDoc(collection(db, 'assessments'), assessment);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    return await addDoc(collection(db, 'assessments'), {
+      ...assessment,
+      teacherId: auth.currentUser.uid
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'assessments');
   }
@@ -124,16 +136,22 @@ export const deleteAssessment = async (id: string) => {
 
 export const getMarks = async () => {
   try {
-    const snapshot = await getDocs(collection(db, 'marks'));
+    if (!auth.currentUser) return [];
+    const q = query(collection(db, 'marks'), where('teacherId', '==', auth.currentUser.uid));
+    const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mark));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'marks');
   }
 };
 
-export const addMark = async (mark: Omit<Mark, 'id'>) => {
+export const addMark = async (mark: Omit<Mark, 'id' | 'teacherId'>) => {
   try {
-    return await addDoc(collection(db, 'marks'), mark);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    return await addDoc(collection(db, 'marks'), {
+      ...mark,
+      teacherId: auth.currentUser.uid
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'marks');
   }
@@ -157,16 +175,22 @@ export const deleteMark = async (id: string) => {
 
 export const getGroups = async () => {
   try {
-    const snapshot = await getDocs(collection(db, 'groups'));
+    if (!auth.currentUser) return [];
+    const q = query(collection(db, 'groups'), where('teacherId', '==', auth.currentUser.uid));
+    const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'groups');
   }
 };
 
-export const addGroup = async (group: Omit<Group, 'id'>) => {
+export const addGroup = async (group: Omit<Group, 'id' | 'teacherId'>) => {
   try {
-    return await addDoc(collection(db, 'groups'), group);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    return await addDoc(collection(db, 'groups'), {
+      ...group,
+      teacherId: auth.currentUser.uid
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'groups');
   }
@@ -190,18 +214,19 @@ export const deleteGroup = async (id: string) => {
 
 export const getYearBoundaries = async () => {
   try {
-    const snapshot = await getDocs(collection(db, 'config'));
-    const boundariesDoc = snapshot.docs.find(doc => doc.id === 'yearBoundaries');
-    return boundariesDoc ? boundariesDoc.data() as Record<string, GradeBoundary[]> : null;
+    if (!auth.currentUser) return null;
+    const boundariesDoc = await getDoc(doc(db, 'config', auth.currentUser.uid));
+    return boundariesDoc.exists() ? boundariesDoc.data() as Record<string, GradeBoundary[]> : null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, 'config/yearBoundaries');
+    handleFirestoreError(error, OperationType.GET, 'config');
   }
 };
 
 export const updateYearBoundaries = async (boundaries: Record<string, GradeBoundary[]>) => {
   try {
-    await setDoc(doc(db, 'config', 'yearBoundaries'), boundaries);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    await setDoc(doc(db, 'config', auth.currentUser.uid), boundaries);
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, 'config/yearBoundaries');
+    handleFirestoreError(error, OperationType.UPDATE, 'config');
   }
 };
