@@ -29,7 +29,9 @@ import {
   HelpCircle,
   Lock,
   Unlock,
-  Save
+  Save,
+  Target,
+  Star
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -241,6 +243,7 @@ export default function App() {
     maxMarks: 100, 
     date: new Date().toISOString().split('T')[0] 
   });
+  const [selectedGroupDetails, setSelectedGroupDetails] = useState<Group | null>(null);
   const [marksGroupFilter, setMarksGroupFilter] = useState<string>('all');
   const [newAssessment, setNewAssessment] = useState<{
     name: string;
@@ -1152,6 +1155,200 @@ export default function App() {
     
     const fileName = `Marksheet_${yearFilter}_${groupFilter}_${selectedAcademicYear}.xlsx`.replace(/\s+/g, '_');
     XLSX.writeFile(wb, fileName);
+  };
+
+  const GroupDetailsModal = () => {
+    if (!selectedGroupDetails) return null;
+
+    const groupStudents = students.filter(s => 
+      s.groupName === selectedGroupDetails.name && 
+      s.academicYear === selectedGroupDetails.academicYear
+    );
+
+    const groupPerformances = groupStudents.map(s => {
+      const studentMarks = marks.filter(m => m.studentId === s.id);
+      const studentAssessmentPerformances = studentMarks.map(m => {
+        const assessment = assessments.find(a => a.id === m.assessmentId);
+        if (!assessment) return null;
+        
+        // Match the logic in performanceTabStats (score vs obtainedMarks)
+        const score = Number(m.score) || 0;
+        const maxMarks = Number(assessment.maxMarks) || 100; // Default to 100 if missing
+        let percentage = (score / maxMarks) * 100;
+
+        // Handle resits if present
+        if (m.resitScore !== undefined && m.resitScore !== null) {
+          const resitScore = Number(m.resitScore);
+          const resitMax = Number(m.resitMaxMarks || assessment.maxMarks || 100);
+          const resitPerc = (resitScore / resitMax) * 100;
+          percentage = (percentage + resitPerc) / 2;
+        }
+        
+        return {
+          percentage,
+          points: gradeToPoints(getGrade(percentage, getStudentBoundaries(s)))
+        };
+      }).filter(Boolean) as { percentage: number, points: number }[];
+
+      const hasData = studentAssessmentPerformances.length > 0;
+      const avgPercentage = hasData
+        ? studentAssessmentPerformances.reduce((acc, p) => acc + p.percentage, 0) / studentAssessmentPerformances.length
+        : 0;
+      
+      const avgPoints = hasData
+        ? studentAssessmentPerformances.reduce((acc, p) => acc + p.points, 0) / studentAssessmentPerformances.length
+        : 0;
+
+      return {
+        student: s,
+        avgPercentage,
+        avgPoints,
+        hasData,
+        grade: hasData ? getGrade(avgPercentage, getStudentBoundaries(s)) : 'U'
+      };
+    }).sort((a, b) => b.avgPercentage - a.avgPercentage);
+
+    const studentsWithData = groupPerformances.filter(p => p.hasData);
+    const groupAvgPercentage = studentsWithData.length > 0
+      ? studentsWithData.reduce((acc, p) => acc + p.avgPercentage, 0) / studentsWithData.length
+      : 0;
+    const groupAvgPoints = studentsWithData.length > 0
+      ? studentsWithData.reduce((acc, p) => acc + p.avgPoints, 0) / studentsWithData.length
+      : 0;
+
+    return (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+        >
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-indigo-50/10">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+                <Users className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 font-display">{selectedGroupDetails.name}</h3>
+                <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest font-sans">
+                  {String(selectedGroupDetails.yearGroup).includes('IB') ? 'IB DP' : 'IGCSE'} • {selectedGroupDetails.academicYear} • {groupStudents.length} Students
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setSelectedGroupDetails(null)}
+              className="w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 transition-all font-sans"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 font-sans">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Student Roster & Performance</span>
+              <div className="flex items-center gap-2">
+                <div className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[9px] font-bold uppercase tracking-wider flex items-center gap-2">
+                  <Target className="w-3 h-3" />
+                  Avg: {groupAvgPercentage.toFixed(1)}%
+                </div>
+                <div className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[9px] font-bold uppercase tracking-wider flex items-center gap-2">
+                  <Star className="w-3 h-3" />
+                  Avg Grade: {getGrade(groupAvgPercentage, getStudentBoundaries(groupPerformances[0]?.student || students[0]))} ({groupAvgPoints.toFixed(1)} pts)
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              {groupPerformances.map((perf, idx) => (
+                <div key={perf.student.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 group/item hover:border-indigo-200 transition-all">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold text-slate-300 w-4">{idx + 1}</span>
+                    <span className="text-sm font-bold text-slate-700">{perf.student.name}</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="text-[11px] font-bold text-slate-900">{perf.hasData ? `${perf.avgPercentage.toFixed(1)}%` : '—'}</p>
+                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Avg Score</p>
+                    </div>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${perf.hasData ? 'bg-white border-slate-200' : 'bg-slate-100 border-transparent text-slate-400'}`}>
+                      <span className={`text-xs font-black ${perf.hasData ? 'text-indigo-600' : 'text-slate-400'}`}>{perf.grade}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {groupPerformances.length === 0 && (
+                <div className="py-12 text-center">
+                  <Users className="w-10 h-10 text-slate-200 mx-auto mb-2" />
+                  <p className="text-slate-400 text-sm italic">No students found assigned to this group in {selectedGroupDetails.academicYear}.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="p-6 border-t border-slate-100 bg-white flex flex-col gap-4">
+            <div className="flex items-start gap-2 bg-rose-50 p-3 rounded-xl border border-rose-100">
+              <AlertCircle className="w-4 h-4 text-rose-500 mt-0.5" />
+              <p className="text-[10px] text-rose-600 font-medium leading-relaxed uppercase tracking-tight">
+                Warning: Deleting this group will clear the "Group Name" field for all students listed above. It will not delete the students or their marks.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setSelectedGroupDetails(null)}
+                className="flex-1 px-6 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl font-bold text-xs transition-all uppercase tracking-widest"
+              >
+                Back
+              </button>
+              <button 
+                onClick={() => {
+                  setConfirmModal({
+                    isOpen: true,
+                    title: 'Delete Class Group',
+                    message: `This will remove "${selectedGroupDetails.name}" from the system. ${groupStudents.length} students will have their group name cleared. Continue?`,
+                    confirmText: 'Confirm Deletion',
+                    type: 'danger',
+                    onConfirm: async () => {
+                      try {
+                        setSaveStatus('saving');
+                        // 1. Delete Group Doc
+                        await fbDeleteGroup(selectedGroupDetails.id);
+                        
+                        // 2. Clear Student groupName fields
+                        const updatePromises = groupStudents.map(s => 
+                          updateDoc(doc(db, 'students', s.id), { groupName: '' })
+                        );
+                        await Promise.all(updatePromises);
+                        
+                        // 3. Sync states
+                        setGroups(prev => prev.filter(g => g.id !== selectedGroupDetails.id));
+                        setStudents(prev => prev.map(s => {
+                          if (groupStudents.some(gs => gs.id === s.id)) {
+                            return { ...s, groupName: '' };
+                          }
+                          return s;
+                        }));
+                        
+                        setSaveStatus('saved');
+                        setTimeout(() => setSaveStatus('idle'), 3000);
+                        setSelectedGroupDetails(null);
+                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                      } catch (err) {
+                        console.error(err);
+                        setSaveStatus('idle');
+                      }
+                    }
+                  });
+                }}
+                className="flex-[2] px-6 py-2.5 bg-rose-600 text-white hover:bg-rose-700 rounded-xl font-bold text-xs transition-all shadow-md shadow-rose-200 flex items-center justify-center gap-2 uppercase tracking-widest"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
   };
 
   const performanceInsights = useMemo(() => {
@@ -5080,55 +5277,80 @@ export default function App() {
                       {groups
                         .filter(g => g.academicYear === selectedAcademicYear)
                         .filter(g => matchesYearFilter(g.yearGroup, yearFilter))
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map(group => (
-                          <div key={group.id} className="card p-4 flex items-center justify-between group/row hover:border-indigo-200 transition-all">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 border border-indigo-100">
-                                <Users className="w-5 h-5" />
-                              </div>
-                              <div>
-                                <h4 className="font-bold text-slate-900 leading-none mb-1">{group.name}</h4>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">
-                                    {group.academicYear}
-                                  </span>
-                                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                    Year {group.yearGroup}
-                                  </span>
-                                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                    {students.filter(s => s.groupName === group.name && s.academicYear === group.academicYear).length} Students
-                                  </span>
+                        .sort((a, b) => {
+                          const yearA = String(a.yearGroup);
+                          const yearB = String(b.yearGroup);
+                          if (yearA !== yearB) return yearA.localeCompare(yearB);
+                          return a.name.localeCompare(b.name);
+                        })
+                        .map(group => {
+                          const groupStudents = students.filter(s => s.groupName === group.name && s.academicYear === group.academicYear);
+                          
+                          // Calculate group average for the card
+                          const groupStats = groupStudents.map(s => {
+                            const studentMarks = marks.filter(m => m.studentId === s.id);
+                            const percentages = studentMarks.map(m => {
+                              const assessment = assessments.find(a => a.id === m.assessmentId);
+                              if (!assessment) return null;
+                              const score = Number(m.score) || 0;
+                              const maxMarks = Number(assessment.maxMarks) || 100;
+                              let p = (score / maxMarks) * 100;
+                              if (m.resitScore !== undefined && m.resitScore !== null) {
+                                const rScore = Number(m.resitScore);
+                                const rMax = Number(m.resitMaxMarks || assessment.maxMarks || 100);
+                                const rPerc = (rScore / rMax) * 100;
+                                p = (p + rPerc) / 2;
+                              }
+                              return p;
+                            }).filter((p): p is number => p !== null);
+                            return percentages.length > 0 ? (percentages.reduce((a, b) => a + b, 0) / percentages.length) : null;
+                          }).filter((p): p is number => p !== null);
+
+                          const avgScore = groupStats.length > 0 ? (groupStats.reduce((a, b) => a + b, 0) / groupStats.length) : null;
+                          const avgGrade = avgScore !== null ? getGrade(avgScore, getStudentBoundaries(groupStudents[0] || students[0])) : null;
+
+                          return (
+                            <div 
+                              key={group.id} 
+                              onClick={() => setSelectedGroupDetails(group)}
+                              className="card p-4 flex items-center justify-between group/row hover:border-indigo-300 hover:bg-slate-50/50 transition-all cursor-pointer shadow-sm hover:shadow-md"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 border border-indigo-100 group-hover/row:bg-indigo-600 group-hover/row:text-white transition-all">
+                                  <Users className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-slate-900 leading-none mb-1">{group.name}</h4>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">
+                                      {group.academicYear}
+                                    </span>
+                                    <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                      Year {group.yearGroup}
+                                    </span>
+                                    <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                      {groupStudents.length} Students
+                                    </span>
+                                    {avgScore !== null && (
+                                      <>
+                                        <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                        <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">
+                                          {avgScore.toFixed(1)}% Avg
+                                        </span>
+                                        <span className="text-[10px] font-black text-indigo-500 ml-1">
+                                          ({avgGrade})
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
+                              <ChevronRight className="w-4 h-4 text-slate-300 group-hover/row:text-indigo-400 group-hover/row:translate-x-0.5 transition-all" />
                             </div>
-                            <button 
-                              onClick={() => {
-                                setConfirmModal({
-                                  isOpen: true,
-                                  title: 'Delete Group',
-                                  message: `Are you sure you want to delete the group "${group.name}"? Students in this group will remain in the system but will have no group assigned.`,
-                                  type: 'danger',
-                                  confirmText: 'Delete Group',
-                                  onConfirm: async () => {
-                                    try {
-                                      await fbDeleteGroup(group.id);
-                                      setGroups(prev => prev.filter(g => g.id !== group.id));
-                                      setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                    } catch (error) {
-                                      console.error("Failed to delete group:", error);
-                                    }
-                                  }
-                                });
-                              }}
-                              className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover/row:opacity-100"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ))}
+                          );
+                        })}
                     </div>
                   )}
                 </div>
@@ -6859,6 +7081,7 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
+        {selectedGroupDetails && <GroupDetailsModal />}
         {confirmModal.isOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
             <motion.div 
