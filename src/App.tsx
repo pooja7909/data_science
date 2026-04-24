@@ -5078,6 +5078,8 @@ export default function App() {
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {groups
+                        .filter(g => g.academicYear === selectedAcademicYear)
+                        .filter(g => matchesYearFilter(g.yearGroup, yearFilter))
                         .sort((a, b) => a.name.localeCompare(b.name))
                         .map(group => (
                           <div key={group.id} className="card p-4 flex items-center justify-between group/row hover:border-indigo-200 transition-all">
