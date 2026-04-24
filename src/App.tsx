@@ -330,6 +330,7 @@ export default function App() {
   const [showPaperGradingModal, setShowPaperGradingModal] = useState<string | null>(null);
   const [extractionMode, setExtractionMode] = useState<'questions' | 'subparts'>('questions');
   const [marksheetSort, setMarksheetSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'level', direction: 'asc' });
+  const [marksheetEditMode, setMarksheetEditMode] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -1048,6 +1049,68 @@ export default function App() {
       .filter(a => performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [assessments, selectedAcademicYear, yearFilter, performanceSubjectFilter]);
+
+  const downloadMarksheet = () => {
+    const wb = XLSX.utils.book_new();
+    
+    // Prepare headers
+    const headers = ['Student Name', 'Academic Year', 'Year Group', 'Class', 'Avg %', 'Avg Grade', 'Avg GP'];
+    performanceTabAssessments.forEach(a => {
+      headers.push(`${a.name} (Mark)`);
+      headers.push(`${a.name} (%)`);
+      headers.push(`${a.name} (Grade)`);
+      headers.push(`${a.name} (GP)`);
+    });
+
+    // Prepare data
+    const data = sortedMarksheetPerformances.map(p => {
+      const row: any[] = [
+        p.student.name,
+        p.student.academicYear,
+        p.student.yearGroup,
+        p.student.groupName,
+        p.averagePercentage.toFixed(1) + '%',
+        getGrade(p.averagePercentage, getStudentBoundaries(p.student)),
+        p.averagePoints ? p.averagePoints.toFixed(2) : '—'
+      ];
+
+      performanceTabAssessments.forEach(a => {
+        const mark = p.marks.find(m => m.assessmentId === a.id);
+        if (mark) {
+          if ((mark as any).absent) {
+            row.push('ABS', 'ABS', 'ABS', 'ABS');
+          } else {
+            const perc = (mark.score / a.maxMarks) * 100;
+            const effPerc = (() => {
+               if (mark.resitScore !== undefined && mark.resitScore !== null) {
+                 const rp = (mark.resitScore / (mark.resitMaxMarks || a.maxMarks)) * 100;
+                 return (perc + rp) / 2;
+               }
+               return perc;
+            })();
+            const grade = getGrade(effPerc, a.boundaries || yearBoundaries[p.student.yearGroup] || []);
+            const points = gradeToPoints(grade);
+            row.push(mark.score, effPerc.toFixed(1) + '%', grade, points);
+          }
+        } else {
+          row.push('—', '—', '—', '—');
+        }
+      });
+      return row;
+    });
+
+    const ws_data = [headers, ...data];
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+    
+    // Auto-size columns
+    const max_width = headers.map((h, i) => Math.max(h.length, ...data.map(r => String(r[i] || '').length)));
+    ws['!cols'] = max_width.map(w => ({ wch: w + 2 }));
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Marksheet');
+    
+    const fileName = `Marksheet_${yearFilter}_${groupFilter}_${selectedAcademicYear}.xlsx`.replace(/\s+/g, '_');
+    XLSX.writeFile(wb, fileName);
+  };
 
   const performanceInsights = useMemo(() => {
     if (performanceTabStats.length === 0) return null;
@@ -3819,8 +3882,40 @@ export default function App() {
                         <List className="w-5 h-5 text-indigo-500" />
                         Class Marksheet Overview
                       </h3>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{filteredPerformances.length} Students — {performanceTabAssessments.length} Assessments</span>
+                        <div className="flex items-center gap-2 ml-4">
+                          <button 
+                            onClick={() => setMarksheetEditMode(!marksheetEditMode)}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all border shadow-sm ${
+                              marksheetEditMode 
+                                ? 'bg-indigo-600 text-white border-indigo-600' 
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            {marksheetEditMode ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+                            {marksheetEditMode ? 'Finish Editing' : 'Bulk Enter Marks'}
+                          </button>
+                          {marksheetEditMode && (
+                            <button 
+                              onClick={() => {
+                                setSaveStatus('saving');
+                                setTimeout(() => setSaveStatus('saved'), 1000);
+                              }}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-xl text-[11px] font-bold transition-all border border-indigo-100"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                              Save Changes
+                            </button>
+                          )}
+                        </div>
+                        <button 
+                          onClick={downloadMarksheet}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-xl text-[11px] font-bold transition-all border border-emerald-100 shadow-sm"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Export Marksheet (Excel)
+                        </button>
                       </div>
                     </div>
                     <div className="overflow-x-auto border rounded-xl">
@@ -3848,6 +3943,9 @@ export default function App() {
                             </th>
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200">
                               Avg Grade
+                            </th>
+                            <th className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200 min-w-[60px]">
+                              Avg GP
                             </th>
                             {performanceTabAssessments.map(a => (
                               <th key={a.id} className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center min-w-[100px] border-r border-slate-200 last:border-r-0">
@@ -3905,8 +4003,45 @@ export default function App() {
                                     <span className="text-[10px] italic text-slate-300">—</span>
                                   )}
                                 </td>
+                                <td className="py-2.5 px-2 text-center border-r border-slate-200">
+                                  {(p as any).hasData ? (
+                                    <span className="text-xs font-bold text-slate-600">
+                                      {p.averagePoints.toFixed(2)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] italic text-slate-300">—</span>
+                                  )}
+                                </td>
                                 {performanceTabAssessments.map(a => {
                                   const mark = p.marks.find(m => m.assessmentId === a.id);
+                                  const isAbsent = mark ? (mark as any).absent : false;
+                                  
+                                  if (marksheetEditMode) {
+                                    return (
+                                      <td key={a.id} className="py-2 px-1 text-center border-r border-slate-100 last:border-r-0">
+                                        <div className="flex flex-col items-center gap-1">
+                                          <input 
+                                            type="number"
+                                            className={`w-12 h-7 px-1 text-center text-xs font-bold border rounded-lg outline-none focus:ring-1 focus:ring-indigo-500 transition-all ${
+                                              isAbsent ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-white border-slate-200 text-slate-900'
+                                            }`}
+                                            placeholder="—"
+                                            value={mark?.score ?? ''}
+                                            onChange={(e) => handleUpdateMark(p.student.id, a.id, e.target.value === '' ? null : parseFloat(e.target.value))}
+                                          />
+                                          <button 
+                                            onClick={() => handleMarkAbsent(p.student.id, a.id, !isAbsent)}
+                                            className={`text-[8px] font-bold uppercase px-1 rounded transition-all ${
+                                              isAbsent ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                                            }`}
+                                          >
+                                            Abs
+                                          </button>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+
                                   if (!mark) {
                                     return (
                                       <td key={a.id} className="py-2.5 px-2 text-center border-r border-slate-100 last:border-r-0 italic text-slate-300 text-[10px]">
@@ -3915,22 +4050,24 @@ export default function App() {
                                     );
                                   }
                                   
-                                  const isAbsent = (mark as any).absent;
+                                  const isAbsentMark = (mark as any).absent;
                                   
                                   const getMarkPerc = (m: Mark) => {
-                                    const p = (m.score / a.maxMarks) * 100;
+                                    const perc = (m.score / a.maxMarks) * 100;
                                     if (m.resitScore !== undefined && m.resitScore !== null) {
                                       const rp = (m.resitScore / (m.resitMaxMarks || a.maxMarks)) * 100;
-                                      return (p + rp) / 2;
+                                      return (perc + rp) / 2;
                                     }
-                                    return p;
+                                    return perc;
                                   };
 
                                   const percentage = getMarkPerc(mark);
+                                  const grade = getGrade(percentage, a.boundaries || yearBoundaries[p.student.yearGroup] || []);
+                                  const points = gradeToPoints(grade);
                                   
                                   return (
                                     <td key={a.id} className="py-2.5 px-2 text-center border-r border-slate-100 last:border-r-0">
-                                      {isAbsent ? (
+                                      {isAbsentMark ? (
                                         <span className="text-[9px] font-bold text-rose-500 px-1.5 py-0.5 bg-rose-50 rounded">ABS</span>
                                       ) : (
                                         <div className="flex flex-col">
@@ -3940,11 +4077,17 @@ export default function App() {
                                               <span className="text-[10px] text-indigo-500 font-bold" title={`Resit: ${mark.resitScore}/${mark.resitMaxMarks || a.maxMarks}`}>®</span>
                                             )}
                                           </div>
-                                          <span className={`text-[9px] font-medium ${
-                                            percentage >= 80 ? 'text-emerald-500' : 
-                                            percentage >= 40 ? 'text-slate-400' : 
-                                            'text-rose-500'
-                                          }`}>{percentage.toFixed(0)}%</span>
+                                          <div className="flex flex-col leading-tight">
+                                            <span className={`text-[9px] font-medium ${
+                                              percentage >= 80 ? 'text-emerald-500' : 
+                                              percentage >= 40 ? 'text-slate-400' : 
+                                              'text-rose-500'
+                                            }`}>{percentage.toFixed(0)}%</span>
+                                            <div className="flex items-center justify-center gap-1 mt-0.5">
+                                              <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 px-1 rounded">{grade}</span>
+                                              <span className="text-[8px] font-bold text-slate-500">[{points}]</span>
+                                            </div>
+                                          </div>
                                         </div>
                                       )}
                                     </td>
