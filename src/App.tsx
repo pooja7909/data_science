@@ -15,6 +15,7 @@ import {
   Edit2,
   Search,
   Filter,
+  Calendar,
   X,
   FileText,
   List,
@@ -290,6 +291,23 @@ export default function App() {
     return () => unsub();
   }, []);
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
+  const [performanceAssessmentFilter, setPerformanceAssessmentFilter] = useState<string>('all');
+  
+  // Local state for Marksheet filters to prevent "glitches" (live re-renders while typing)
+  const [marksheetLocalSearch, setMarksheetLocalSearch] = useState('');
+  const [marksheetLocalGroup, setMarksheetLocalGroup] = useState<string>('all');
+  const [marksheetLocalAssessment, setMarksheetLocalAssessment] = useState<string>('all');
+  
+  const [marksheetSearchQuery, setMarksheetSearchQuery] = useState('');
+  const [marksheetGroupFilter, setMarksheetGroupFilter] = useState<string>('all');
+  const [marksheetAppliedAssessmentFilter, setMarksheetAppliedAssessmentFilter] = useState<string>('all');
+  
+  const applyMarksheetFilters = () => {
+    setMarksheetSearchQuery(marksheetLocalSearch);
+    setMarksheetGroupFilter(marksheetLocalGroup);
+    setPerformanceAssessmentFilter(marksheetLocalAssessment);
+  };
+
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [ibLevelFilter, setIbLevelFilter] = useState<'all' | 'HL' | 'SL'>('all');
   const [modalGroupFilter, setModalGroupFilter] = useState<string>('all');
@@ -816,9 +834,9 @@ export default function App() {
 
   const filteredPerformances = useMemo(() => {
     return performances.filter(p => {
-      const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = p.student.name.toLowerCase().includes(marksheetSearchQuery.toLowerCase());
       const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
-      const matchesGroup = groupFilter === 'all' || p.student.groupName === groupFilter;
+      const matchesGroup = marksheetGroupFilter === 'all' || p.student.groupName === marksheetGroupFilter;
       // Subject filter logic:
       // 1. If student has a subjects[] field (from import), use it directly
       // 2. For Years 7-9, all students take all subjects for their year (Computer Science)
@@ -832,7 +850,7 @@ export default function App() {
       const matchesLevel = ibLevelFilter === 'all' || p.student.ibLevel === ibLevelFilter;
       return matchesSearch && matchesYear && matchesGroup && matchesSubject && matchesLevel;
     });
-  }, [performances, searchQuery, yearFilter, performanceSubjectFilter, groupFilter, ibLevelFilter]);
+  }, [performances, marksheetSearchQuery, yearFilter, performanceSubjectFilter, marksheetGroupFilter, ibLevelFilter]);
 
   const sortedMarksheetPerformances = useMemo(() => {
     return [...filteredPerformances].sort((a, b) => {
@@ -863,6 +881,20 @@ export default function App() {
         return marksheetSort.direction === 'asc'
           ? a.averagePercentage - b.averagePercentage
           : b.averagePercentage - a.averagePercentage;
+      }
+
+      if (marksheetSort.key === 'gp') {
+        return marksheetSort.direction === 'asc'
+          ? a.averagePoints - b.averagePoints
+          : b.averagePoints - a.averagePoints;
+      }
+
+      if (marksheetSort.key === 'grade') {
+        const gradeA = getGrade(a.averagePercentage, getStudentBoundaries(a.student));
+        const gradeB = getGrade(b.averagePercentage, getStudentBoundaries(b.student));
+        return marksheetSort.direction === 'asc'
+          ? gradeA.localeCompare(gradeB)
+          : gradeB.localeCompare(gradeA);
       }
 
       // Default sort (by level if IB, else name)
@@ -1011,10 +1043,14 @@ export default function App() {
       })
       .sort((a, b) => {
         // Try to sort by numerical value or predefined order
-        const order = ['7', '6', '5', '4', '3', '2', '1', 'U', 'A*', 'A', 'B', 'C', 'D', 'E', 'F', 'EXCEEDING', 'AT', 'WORKING TOWARDS'];
-        const idxA = order.indexOf(a.label.toUpperCase());
-        const idxB = order.indexOf(b.label.toUpperCase());
+        const order = ['9', '8', '7', '6', '5', '4', '3', '2', '1', 'U', 'A*', 'A', 'B', 'C', 'D', 'E', 'F', 'EXCEEDING', 'AT', 'WORKING TOWARDS'];
+        const gradeA = a.label.toUpperCase();
+        const gradeB = b.label.toUpperCase();
+        const idxA = order.indexOf(gradeA);
+        const idxB = order.indexOf(gradeB);
         if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
         return b.count - a.count;
       });
   };
@@ -1044,12 +1080,17 @@ export default function App() {
   }, [performanceTabStats, performanceDisplayMode]);
 
   const performanceTabAssessments = useMemo(() => {
-    return assessments
+    let filtered = assessments
       .filter(a => a.academicYear === selectedAcademicYear)
       .filter(a => matchesYearFilter(a.yearGroup, yearFilter))
-      .filter(a => performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [assessments, selectedAcademicYear, yearFilter, performanceSubjectFilter]);
+      .filter(a => performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter);
+    
+    if (performanceAssessmentFilter !== 'all') {
+      filtered = filtered.filter(a => a.id === performanceAssessmentFilter);
+    }
+
+    return filtered.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [assessments, selectedAcademicYear, yearFilter, performanceSubjectFilter, performanceAssessmentFilter]);
 
   const downloadMarksheet = () => {
     const wb = XLSX.utils.book_new();
@@ -3048,7 +3089,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-30">
+      <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-4 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
@@ -3082,6 +3123,10 @@ export default function App() {
               </button>
             ))}
           </nav>
+
+          <div className="md:hidden flex items-center bg-indigo-600 text-white px-3 py-1.5 rounded-xl font-bold text-[10px] uppercase tracking-wider">
+            {activeTab}
+          </div>
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
@@ -3215,7 +3260,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+      <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full pb-24 md:pb-6">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div 
@@ -3886,14 +3931,13 @@ export default function App() {
                   </div>
 
                   <div className="card p-6 overflow-hidden">
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                        <List className="w-5 h-5 text-indigo-500" />
-                        Class Marksheet Overview
-                      </h3>
-                      <div className="flex items-center gap-3">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{filteredPerformances.length} Students — {performanceTabAssessments.length} Assessments</span>
-                        <div className="flex items-center gap-2 ml-4">
+                    <div className="flex flex-col gap-6 mb-6">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                          <List className="w-5 h-5 text-indigo-500" />
+                          Class Marksheet Overview
+                        </h3>
+                        <div className="flex items-center gap-2">
                           <button 
                             onClick={() => setMarksheetEditMode(!marksheetEditMode)}
                             className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all border shadow-sm ${
@@ -3903,7 +3947,7 @@ export default function App() {
                             }`}
                           >
                             {marksheetEditMode ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
-                            {marksheetEditMode ? 'Finish Editing' : 'Bulk Enter Marks'}
+                            {marksheetEditMode ? 'Finish' : 'Bulk Marks'}
                           </button>
                           {marksheetEditMode && (
                             <button 
@@ -3914,19 +3958,103 @@ export default function App() {
                               className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-xl text-[11px] font-bold transition-all border border-indigo-100"
                             >
                               <Save className="w-3.5 h-3.5" />
-                              Save Changes
+                              Save
                             </button>
                           )}
+                          <button 
+                            onClick={downloadMarksheet}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-xl text-[11px] font-bold transition-all border border-emerald-100 shadow-sm"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Export
+                          </button>
                         </div>
-                        <button 
-                          onClick={downloadMarksheet}
-                          className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-xl text-[11px] font-bold transition-all border border-emerald-100 shadow-sm"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Export Marksheet (Excel)
-                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100 items-end">
+                        <div className="space-y-1.5 font-sans">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Student Name</label>
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <input 
+                              type="text"
+                              placeholder="Search..."
+                              className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                              value={marksheetLocalSearch}
+                              onChange={(e) => setMarksheetLocalSearch(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 font-sans">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Class Group</label>
+                          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
+                            <Users className="w-4 h-4 text-slate-400" />
+                            <select 
+                              className="flex-1 bg-transparent border-none text-sm font-medium text-slate-700 outline-none focus:ring-0"
+                              value={marksheetLocalGroup}
+                              onChange={(e) => setMarksheetLocalGroup(e.target.value)}
+                            >
+                              <option value="all">All Groups</option>
+                              {groups
+                                .filter(g => matchesYearFilter(g.yearGroup, yearFilter))
+                                .sort((a, b) => a.name.localeCompare(b.name))
+                                .map(g => (
+                                  <option key={g.id} value={g.name}>{g.name}</option>
+                                ))
+                              }
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 font-sans">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Assessment</label>
+                          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 overflow-hidden">
+                            <Calendar className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                            <select 
+                              className="flex-1 bg-transparent border-none text-sm font-medium text-slate-700 outline-none focus:ring-0 truncate max-w-[150px]"
+                              value={marksheetLocalAssessment}
+                              onChange={(e) => setMarksheetLocalAssessment(e.target.value)}
+                            >
+                              <option value="all">All Data</option>
+                              {assessments
+                                .filter(a => a.academicYear === selectedAcademicYear)
+                                .filter(a => matchesYearFilter(a.yearGroup, yearFilter))
+                                .filter(a => performanceSubjectFilter === 'all' || a.subject === performanceSubjectFilter)
+                                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                                .map(a => {
+                                  const dateStr = new Date(a.date).toLocaleDateString();
+                                  const label = `${a.name} (${dateStr})`;
+                                  return (
+                                    <option key={a.id} value={a.id} title={label}>
+                                      {label.length > 35 ? label.substring(0, 32) + '...' : label}
+                                    </option>
+                                  );
+                                })
+                              }
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={applyMarksheetFilters}
+                            className="w-full bg-indigo-600 text-white hover:bg-indigo-700 font-bold py-2 px-4 rounded-xl text-xs transition-all shadow-md shadow-indigo-200 flex items-center justify-center gap-2 whitespace-nowrap"
+                          >
+                            <Filter className="w-3.5 h-3.5" />
+                            Apply Filters
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-end">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right leading-tight">
+                            {filteredPerformances.length} Students<br/>
+                            {performanceTabAssessments.length} Assessments
+                          </span>
+                        </div>
                       </div>
                     </div>
+
                     <div className="overflow-x-auto border rounded-xl">
                       <table className="w-full text-left border-collapse min-w-[800px]">
                         <thead>
@@ -3950,16 +4078,28 @@ export default function App() {
                                 {marksheetSort.key === 'avg' && (marksheetSort.direction === 'asc' ? '↑' : '↓')}
                               </div>
                             </th>
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200">
-                              Avg Grade
+                            <th 
+                              className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors"
+                              onClick={() => setMarksheetSort(prev => ({ key: 'grade', direction: prev.key === 'grade' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
+                            >
+                              <div className="flex items-center justify-center gap-1">
+                                Avg Grade
+                                {marksheetSort.key === 'grade' && (marksheetSort.direction === 'asc' ? '↑' : '↓')}
+                              </div>
                             </th>
-                            <th className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200 min-w-[60px]">
-                              Avg GP
+                            <th 
+                              className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200 min-w-[60px] cursor-pointer hover:bg-slate-100 transition-colors"
+                              onClick={() => setMarksheetSort(prev => ({ key: 'gp', direction: prev.key === 'gp' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
+                            >
+                              <div className="flex items-center justify-center gap-1">
+                                Avg GP
+                                {marksheetSort.key === 'gp' && (marksheetSort.direction === 'asc' ? '↑' : '↓')}
+                              </div>
                             </th>
                             {performanceTabAssessments.map(a => (
-                              <th key={a.id} className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center min-w-[100px] border-r border-slate-200 last:border-r-0">
+                              <th key={a.id} className="py-3 px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center min-w-[120px] max-w-[120px] border-r border-slate-200 last:border-r-0 overflow-hidden">
                                 <div className="flex flex-col items-center">
-                                  <span className="truncate max-w-[90px]" title={a.name}>{a.name}</span>
+                                  <span className="truncate max-w-[110px]" title={a.name}>{a.name}</span>
                                   <span className="text-[8px] text-indigo-500 font-bold">max: {a.maxMarks}</span>
                                 </div>
                               </th>
@@ -6679,6 +6819,30 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      {/* Mobile Navigation */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 py-2 z-50 flex items-center justify-around shadow-[0_-4px_10px_-2px_rgba(0,0,0,0.05)]">
+        {[
+          { id: 'dashboard', icon: BarChart3, label: 'Stats' },
+          { id: 'performance', icon: TrendingUp, label: 'Marks' },
+          { id: 'students', icon: Users, label: 'Kids' },
+          { id: 'assessments', icon: Plus, label: 'Add' },
+          { id: 'settings', icon: Settings, label: 'Prep' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all ${
+              activeTab === tab.id 
+                ? 'text-indigo-600' 
+                : 'text-slate-400'
+            }`}
+          >
+            <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-indigo-600' : 'text-slate-400'}`} />
+            <span className="text-[10px] font-bold uppercase tracking-tighter">{tab.label}</span>
+          </button>
+        ))}
+      </nav>
+
       <footer className="bg-white border-t border-slate-200 py-6 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-sm text-slate-500">© {new Date().getFullYear()} Pooja Arora. All rights reserved.</p>
