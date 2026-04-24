@@ -27,7 +27,8 @@ import {
   Database,
   HelpCircle,
   Lock,
-  Unlock
+  Unlock,
+  Save
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -1071,7 +1072,7 @@ export default function App() {
         p.student.groupName,
         p.averagePercentage.toFixed(1) + '%',
         getGrade(p.averagePercentage, getStudentBoundaries(p.student)),
-        p.averagePoints ? p.averagePoints.toFixed(2) : '—'
+        (p as any).hasData ? p.averagePoints.toFixed(2) : '—'
       ];
 
       performanceTabAssessments.forEach(a => {
@@ -3556,7 +3557,10 @@ export default function App() {
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Selected Average</p>
-                    <h4 className="text-xl font-bold text-slate-900">{performanceInsights?.average.toFixed(performanceDisplayMode === 'points' ? 2 : 1)}{performanceInsights?.labelSuffix}</h4>
+                    <h4 className="text-xl font-bold text-slate-900">
+                      {performanceInsights ? performanceInsights.average.toFixed(performanceDisplayMode === 'points' ? 2 : 1) : '0.0'}
+                      {performanceInsights?.labelSuffix}
+                    </h4>
                   </div>
                 </div>
                 <div className="card p-4 flex flex-col gap-2 bg-white overflow-y-auto max-h-[85px] custom-scrollbar">
@@ -3570,7 +3574,10 @@ export default function App() {
                     {performanceInsights?.allGroupAverages.map(g => (
                       <div key={g.name} className="flex justify-between items-center text-[10px] font-bold border-b border-slate-50 last:border-0 pb-0.5">
                         <span className="text-slate-600 truncate max-w-[120px]">{g.name}</span>
-                        <span className="text-emerald-600">{g.avg.toFixed(performanceDisplayMode === 'points' ? 2 : 1)}{performanceInsights.labelSuffix}</span>
+                        <span className="text-emerald-600">
+                          {g.avg.toFixed(performanceDisplayMode === 'points' ? 2 : 1)}
+                          {performanceInsights?.labelSuffix}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -3582,7 +3589,9 @@ export default function App() {
                   <div>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Most Improved</p>
                     <h4 className="text-xl font-bold text-slate-900 truncate max-w-[150px]">{performanceInsights?.mostImproved?.name || 'N/A'}</h4>
-                    <p className="text-[10px] text-amber-600 font-bold">+{performanceInsights?.mostImproved?.improvement.toFixed(1)}{performanceInsights?.labelSuffix} Growth</p>
+                    <p className="text-[10px] text-amber-600 font-bold">
+                      {performanceInsights?.mostImproved ? `+${performanceInsights.mostImproved.improvement.toFixed(1)}${performanceInsights.labelSuffix} Growth` : 'No growth data'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -4097,7 +4106,7 @@ export default function App() {
                             );
                           }) : (
                             <tr>
-                              <td colSpan={performanceTabAssessments.length + 2} className="py-12 text-center bg-white">
+                              <td colSpan={performanceTabAssessments.length + 4} className="py-12 text-center bg-white">
                                 <p className="text-sm text-slate-400 italic">No students found matching current filters.</p>
                               </td>
                             </tr>
