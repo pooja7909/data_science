@@ -5063,6 +5063,75 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 mb-2 font-display">Manage Class Groups</h2>
+                  <p className="text-slate-500 text-sm">View and manage your custom class groups. Deleting a group will not delete the students within it, but they will no longer be associated with that group name.</p>
+                </div>
+
+                <div className="grid gap-3">
+                  {groups.length === 0 ? (
+                    <div className="card p-8 text-center bg-slate-50/50 border-dashed">
+                      <Users className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                      <p className="text-slate-400 text-sm">No custom groups found.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {groups
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map(group => (
+                          <div key={group.id} className="card p-4 flex items-center justify-between group/row hover:border-indigo-200 transition-all">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 border border-indigo-100">
+                                <Users className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-slate-900 leading-none mb-1">{group.name}</h4>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">
+                                    {group.academicYear}
+                                  </span>
+                                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                    Year {group.yearGroup}
+                                  </span>
+                                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                    {students.filter(s => s.groupName === group.name && s.academicYear === group.academicYear).length} Students
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setConfirmModal({
+                                  isOpen: true,
+                                  title: 'Delete Group',
+                                  message: `Are you sure you want to delete the group "${group.name}"? Students in this group will remain in the system but will have no group assigned.`,
+                                  type: 'danger',
+                                  confirmText: 'Delete Group',
+                                  onConfirm: async () => {
+                                    try {
+                                      await fbDeleteGroup(group.id);
+                                      setGroups(prev => prev.filter(g => g.id !== group.id));
+                                      setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                    } catch (error) {
+                                      console.error("Failed to delete group:", error);
+                                    }
+                                  }
+                                });
+                              }}
+                              className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover/row:opacity-100"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3 mb-2">
