@@ -52,7 +52,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenAI, Type } from "@google/genai";
-import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries, deleteStudent as fbDeleteStudent, deleteAssessment as fbDeleteAssessment, deleteMark as fbDeleteMark, deleteGroup as fbDeleteGroup } from './services/firebaseService';
+import { getStudents, getAssessments, getMarks, getGroups, getYearBoundaries, updateYearBoundaries, deleteStudent as fbDeleteStudent, deleteAssessment as fbDeleteAssessment, deleteMark as fbDeleteMark, deleteGroup as fbDeleteGroup, subscribeToData, subscribeToConfig, addStudent as fbAddStudent, addAssessment as fbAddAssessment, addGroup as fbAddGroup, updateStudent as fbUpdateStudent, updateAssessment as fbUpdateAssessment, updateGroup as fbUpdateGroup, setMark as fbSetMark, getMarkId } from './services/firebaseService';
 import { auth, db } from './firebase';
 import { 
   setDoc, 
@@ -275,23 +275,20 @@ export default function App() {
   // Authentication & System State
   const [isSystemLoading, setIsSystemLoading] = useState(true);
 
-  // Authentication useEffect
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setIsSystemLoading(false);
+      } else {
         try {
           await signInAnonymously(auth);
-        } catch (err) {
-          console.error("Auth failed:", err);
-        } finally {
+        } catch (e) {
+          console.error("Anonymous auth failed:", e);
           setIsSystemLoading(false);
         }
-      } else {
-        setIsSystemLoading(false);
       }
     });
-
-    return () => unsub();
+    return () => unsubscribe();
   }, []);
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
   const [performanceAssessmentFilter, setPerformanceAssessmentFilter] = useState<string>('all');
@@ -348,6 +345,21 @@ export default function App() {
       if (percentage >= b.minPercentage) return b.grade;
     }
     return 'U';
+  };
+
+  const getMarkPercentage = (mark: Mark | undefined, assessment: Assessment | undefined): number => {
+    if (!mark || !assessment) return 0;
+    const score = Number(mark.score) || 0;
+    const maxMarks = Number(assessment.maxMarks) || 100;
+    const basePerc = (score / maxMarks) * 100;
+
+    if (mark.resitScore !== undefined && mark.resitScore !== null) {
+      const resitScore = Number(mark.resitScore);
+      const resitMax = Number(mark.resitMaxMarks || assessment.maxMarks || 100);
+      const resitPerc = (resitScore / resitMax) * 100;
+      return (basePerc + resitPerc) / 2;
+    }
+    return basePerc;
   };
   const [showPaperGradingModal, setShowPaperGradingModal] = useState<string | null>(null);
   const [extractionMode, setExtractionMode] = useState<'questions' | 'subparts'>('questions');
@@ -520,7 +532,10 @@ export default function App() {
             setMarks(uniqueMarks);
           }
           if (fbGroups && fbGroups.length > 0) setGroups(fbGroups);
-          if (fbBoundaries) setYearBoundaries(fbBoundaries as Record<string, GradeBoundary[]>);
+          if (fbBoundaries) {
+            if (fbBoundaries.boundaries) setYearBoundaries(fbBoundaries.boundaries);
+            if (fbBoundaries.locks) setLockedYearBoundaries(fbBoundaries.locks);
+          }
           
           console.log("Cloud data synced.");
         }
@@ -543,61 +558,91 @@ export default function App() {
     return () => clearTimeout(fallbackTimer);
   }, [useCloudSync, isSystemLoading]);
 
-  // Save data when state changes
+  // Real-time Sync Effect
   useEffect(() => {
-    if (!hasLoaded || isFetching.current || !auth.currentUser) return;
+    if (!useCloudSync || !auth.currentUser || isSystemLoading || !hasLoaded) return;
 
-    const saveData = async () => {
-      // Backup to localStorage
-      try {
-        localStorage.setItem('science-tracker-students', JSON.stringify(students));
-        localStorage.setItem('science-tracker-assessments', JSON.stringify(assessments));
-        localStorage.setItem('science-tracker-marks', JSON.stringify(marks));
-        localStorage.setItem('science-tracker-groups', JSON.stringify(groups));
-        localStorage.setItem('science-tracker-boundaries', JSON.stringify(yearBoundaries));
-        localStorage.setItem('science-tracker-use-cloud', String(useCloudSync));
-      } catch (e) {}
-
-      if (useCloudSync) {
-        setSaveStatus('saving');
-        try {
-          console.log("Saving data to Firebase...");
-          // Save all students, assessments, marks, groups, and year boundaries to Firebase
-          await Promise.all([
-            ...students.map(s => setDoc(doc(db, 'students', s.id), cleanFirestoreData({
-              ...s,
-              yearGroup: migrateYear(s.yearGroup),
-              teacherId: auth.currentUser?.uid
-            }))),
-            ...assessments.map(a => setDoc(doc(db, 'assessments', a.id), cleanFirestoreData({
-              ...a,
-              yearGroup: migrateYear(a.yearGroup),
-              teacherId: auth.currentUser?.uid
-            }))),
-            ...marks.map(m => setDoc(doc(db, 'marks', m.id), cleanFirestoreData({
-              ...m,
-              teacherId: auth.currentUser?.uid
-            }))),
-            ...groups.map(g => setDoc(doc(db, 'groups', g.id), cleanFirestoreData({
-              ...g,
-              yearGroup: migrateYear(g.yearGroup),
-              teacherId: auth.currentUser?.uid
-            }))),
-            updateYearBoundaries(yearBoundaries)
-          ]);
-          console.log("Data saved successfully.");
-          setSaveStatus('saved');
-          setTimeout(() => setSaveStatus('idle'), 3000);
-        } catch (error) {
-          console.error("Failed to save data:", error);
-          setSaveStatus('idle');
+    console.log("Setting up real-time sync with Firebase...");
+    
+    const unsubStudents = subscribeToData('students', (data) => {
+      if (data && data.length > 0) setStudents(data);
+    });
+    
+    const unsubAssessments = subscribeToData('assessments', (data) => {
+      if (data && data.length > 0) setAssessments(data);
+    });
+    
+    const unsubMarks = subscribeToData('marks', (mData) => {
+      if (!mData) return;
+      const uniqueMarks: Mark[] = [];
+      const markKeys = new Set<string>();
+      mData.forEach(m => {
+        const key = `${m.studentId}_${m.assessmentId}`;
+        if (!markKeys.has(key)) {
+          markKeys.add(key);
+          uniqueMarks.push(m);
         }
+      });
+      setMarks(uniqueMarks);
+    });
+    
+    const unsubGroups = subscribeToData('groups', (data) => {
+      if (data && data.length > 0) setGroups(data);
+    });
+
+    const unsubConfig = subscribeToConfig((data) => {
+      if (data) {
+        if (data.boundaries) setYearBoundaries(data.boundaries);
+        if (data.locks) setLockedYearBoundaries(data.locks);
+      }
+    });
+
+    return () => {
+      console.log("Cleaning up real-time subscripitons...");
+      unsubStudents();
+      unsubAssessments();
+      unsubMarks();
+      unsubGroups();
+      unsubConfig();
+    };
+  }, [useCloudSync, auth.currentUser, isSystemLoading, hasLoaded]);
+
+  // Save data locally when state changes
+  useEffect(() => {
+    if (!hasLoaded || isFetching.current) return;
+
+    try {
+      localStorage.setItem('science-tracker-students', JSON.stringify(students));
+      localStorage.setItem('science-tracker-assessments', JSON.stringify(assessments));
+      localStorage.setItem('science-tracker-marks', JSON.stringify(marks));
+      localStorage.setItem('science-tracker-groups', JSON.stringify(groups));
+      localStorage.setItem('science-tracker-boundaries', JSON.stringify(yearBoundaries));
+      localStorage.setItem('science-tracker-use-cloud', String(useCloudSync));
+    } catch (e) {}
+  }, [students, assessments, marks, groups, yearBoundaries, hasLoaded, useCloudSync]);
+
+  // Sync Shared Config to Cloud
+  useEffect(() => {
+    if (!hasLoaded || !useCloudSync || isFetching.current || !auth.currentUser) return;
+
+    const saveConfig = async () => {
+      setSaveStatus('saving');
+      try {
+        await updateYearBoundaries({
+          boundaries: yearBoundaries,
+          locks: lockedYearBoundaries
+        });
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } catch (error) {
+        console.error("Failed to save config to Cloud:", error);
+        setSaveStatus('idle');
       }
     };
 
-    const timer = setTimeout(saveData, 1000); // Debounce save
+    const timer = setTimeout(saveConfig, 1000);
     return () => clearTimeout(timer);
-  }, [students, assessments, marks, groups, yearBoundaries, hasLoaded, useCloudSync]);
+  }, [yearBoundaries, lockedYearBoundaries, hasLoaded, useCloudSync]);
 
   // Reset subject filter if not available in new year group
   useEffect(() => {
@@ -751,22 +796,12 @@ export default function App() {
       const sittingMarks = studentMarks.filter(m => !(m as any).absent);
       const absentCount = studentMarks.length - sittingMarks.length;
 
-      const getEffectivePerc = (m: Mark & { assessment: Assessment }) => {
-        const perc = (m.score / m.assessment.maxMarks) * 100;
-        if (m.resitScore !== undefined && m.resitScore !== null) {
-          const resitMax = m.resitMaxMarks || m.assessment.maxMarks;
-          const resitPerc = (m.resitScore / resitMax) * 100;
-          return (perc + resitPerc) / 2;
-        }
-        return perc;
-      };
-
-      const totalPercentage = sittingMarks.reduce((acc, m) => acc + getEffectivePerc(m), 0);
+      const totalPercentage = sittingMarks.reduce((acc, m) => acc + getMarkPercentage(m, m.assessment), 0);
       const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : null;
 
       // Calculate Average Points
       const marksWithPoints = sittingMarks.map(m => {
-        const effPerc = getEffectivePerc(m);
+        const effPerc = getMarkPercentage(m, m.assessment);
         const boundaries = getStudentBoundaries(student);
         const grade = getGrade(effPerc, boundaries);
         return gradeToPoints(grade);
@@ -776,8 +811,8 @@ export default function App() {
       // Trend: only from assessments the student sat, need at least 2
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
       if (sittingMarks.length >= 2) {
-        const last = getEffectivePerc(sittingMarks[sittingMarks.length - 1]);
-        const prev = getEffectivePerc(sittingMarks[sittingMarks.length - 2]);
+        const last = getMarkPercentage(sittingMarks[sittingMarks.length - 1], sittingMarks[sittingMarks.length - 1].assessment);
+        const prev = getMarkPercentage(sittingMarks[sittingMarks.length - 2], sittingMarks[sittingMarks.length - 2].assessment);
         if (last > prev + 2) trend = 'improving';
         else if (last < prev - 2) trend = 'declining';
       }
@@ -952,22 +987,12 @@ export default function App() {
       // Only include marks where the student actually sat the assessment (not absent)
       const sittingMarks = allStudentMarks.filter(m => !(m as any).absent);
 
-      const getEffectivePerc = (m: Mark & { assessment: Assessment }) => {
-        const perc = (m.score / m.assessment.maxMarks) * 100;
-        if (m.resitScore !== undefined && m.resitScore !== null) {
-          const resitMax = m.resitMaxMarks || m.assessment.maxMarks;
-          const resitPerc = (m.resitScore / resitMax) * 100;
-          return (perc + resitPerc) / 2;
-        }
-        return perc;
-      };
-
-      const totalPercentage = sittingMarks.reduce((acc, m) => acc + getEffectivePerc(m), 0);
+      const totalPercentage = sittingMarks.reduce((acc, m) => acc + getMarkPercentage(m, m.assessment), 0);
       const averagePercentage = sittingMarks.length > 0 ? totalPercentage / sittingMarks.length : 0;
 
       // Calculate Average Points
       const marksWithPoints = sittingMarks.map(m => {
-        const effPerc = getEffectivePerc(m);
+        const effPerc = getMarkPercentage(m, m.assessment);
         const boundaries = getStudentBoundaries(student);
         const grade = getGrade(effPerc, boundaries);
         return gradeToPoints(grade);
@@ -977,8 +1002,8 @@ export default function App() {
       // Trend: only from assessments the student sat, need at least 2
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
       if (sittingMarks.length >= 2) {
-        const last = getEffectivePerc(sittingMarks[sittingMarks.length - 1]);
-        const prev = getEffectivePerc(sittingMarks[sittingMarks.length - 2]);
+        const last = getMarkPercentage(sittingMarks[sittingMarks.length - 1], sittingMarks[sittingMarks.length - 1].assessment);
+        const prev = getMarkPercentage(sittingMarks[sittingMarks.length - 2], sittingMarks[sittingMarks.length - 2].assessment);
         if (last > prev + 2) trend = 'improving';
         else if (last < prev - 2) trend = 'declining';
       }
@@ -1125,15 +1150,8 @@ export default function App() {
           if ((mark as any).absent) {
             row.push('ABS', 'ABS', 'ABS', 'ABS');
           } else {
-            const perc = (mark.score / a.maxMarks) * 100;
-            const effPerc = (() => {
-               if (mark.resitScore !== undefined && mark.resitScore !== null) {
-                 const rp = (mark.resitScore / (mark.resitMaxMarks || a.maxMarks)) * 100;
-                 return (perc + rp) / 2;
-               }
-               return perc;
-            })();
-            const grade = getGrade(effPerc, a.boundaries || yearBoundaries[p.student.yearGroup] || []);
+            const effPerc = getMarkPercentage(mark, a);
+            const grade = getGrade(effPerc, a.boundaries || getStudentBoundaries(p.student));
             const points = gradeToPoints(grade);
             row.push(mark.score, effPerc.toFixed(1) + '%', grade, points);
           }
@@ -1171,18 +1189,7 @@ export default function App() {
         const assessment = assessments.find(a => a.id === m.assessmentId);
         if (!assessment) return null;
         
-        // Match the logic in performanceTabStats (score vs obtainedMarks)
-        const score = Number(m.score) || 0;
-        const maxMarks = Number(assessment.maxMarks) || 100; // Default to 100 if missing
-        let percentage = (score / maxMarks) * 100;
-
-        // Handle resits if present
-        if (m.resitScore !== undefined && m.resitScore !== null) {
-          const resitScore = Number(m.resitScore);
-          const resitMax = Number(m.resitMaxMarks || assessment.maxMarks || 100);
-          const resitPerc = (resitScore / resitMax) * 100;
-          percentage = (percentage + resitPerc) / 2;
-        }
+        const percentage = getMarkPercentage(m, assessment);
         
         return {
           percentage,
@@ -1711,6 +1718,10 @@ export default function App() {
           const newStudentsList: Student[] = [...students];
           const newGroupsList: Group[] = [...groups];
           const newAssessmentsList: Assessment[] = [...assessments];
+          
+          const addedGroups: Group[] = [];
+          const addedStudents: Student[] = [];
+          const addedAssessments: Assessment[] = [];
 
           // Promote Groups
           currentGroups.forEach(group => {
@@ -1718,12 +1729,16 @@ export default function App() {
             if (nextYearGroup) {
               const exists = groups.find(g => g.name === group.name && g.yearGroup === nextYearGroup && g.academicYear === nextYear);
               if (!exists) {
-                newGroupsList.push({
-                  id: Math.random().toString(36).substr(2, 9),
-                  name: group.name,
+                const groupName = group.name;
+                const newId = `group_${groupName}_${nextYearGroup}_${nextYear}`.replace(/\s+/g, '_').toLowerCase();
+                const newGroup = {
+                  id: newId,
+                  name: groupName,
                   yearGroup: nextYearGroup,
                   academicYear: nextYear
-                });
+                };
+                newGroupsList.push(newGroup);
+                addedGroups.push(newGroup);
               }
             }
           });
@@ -1734,13 +1749,16 @@ export default function App() {
             if (nextYearGroup) {
               const exists = students.find(s => s.name === student.name && s.yearGroup === nextYearGroup && s.academicYear === nextYear);
               if (!exists) {
-                newStudentsList.push({
-                  id: Math.random().toString(36).substr(2, 9),
-                  name: student.name,
+                const newId = `student_${student.name}_${nextYearGroup}_${nextYear}`.replace(/\s+/g, '_').toLowerCase();
+                const newStudentItem = {
+                  ...student,
+                  id: newId,
                   yearGroup: nextYearGroup,
                   groupName: nextYearGroup === 'Graduated' ? `Class of ${selectedAcademicYear.split('-')[0]}` : student.groupName,
                   academicYear: nextYear
-                });
+                };
+                newStudentsList.push(newStudentItem);
+                addedStudents.push(newStudentItem);
               }
             }
           });
@@ -1760,22 +1778,31 @@ export default function App() {
                 const d = new Date(assessment.date);
                 d.setFullYear(d.getFullYear() + 1);
                 nextDate = d.toISOString().split('T')[0];
-              } catch (e) {
-                // Fallback to original date if parsing fails
-              }
+              } catch (e) {}
 
-              newAssessmentsList.push({
+              const newId = `assessment_${assessment.name}_${assessment.subject}_${assessment.yearGroup}_${nextYear}`.replace(/\s+/g, '_').toLowerCase();
+              const newAssessmentItem = {
                 ...assessment,
-                id: Math.random().toString(36).substr(2, 9),
+                id: newId,
                 academicYear: nextYear,
                 date: nextDate
-              });
+              };
+              newAssessmentsList.push(newAssessmentItem);
+              addedAssessments.push(newAssessmentItem);
             }
           });
 
           setStudents(newStudentsList);
           setGroups(newGroupsList);
           setAssessments(newAssessmentsList);
+
+          if (useCloudSync) {
+            await Promise.all([
+              ...addedGroups.map(g => fbAddGroup(g)),
+              ...addedStudents.map(s => fbAddStudent(s)),
+              ...addedAssessments.map(a => fbAddAssessment(a))
+            ]);
+          }
           
           // Update filters to follow the cohort
           const nextYG = getNextYearGroup(yearFilter as YearGroup);
@@ -2177,13 +2204,18 @@ export default function App() {
         if (existingStudentKeys.has(key) || seenInImport.has(key)) {
           duplicateCount++;
         } else {
-          toAdd.push(s);
+          const studentId = s.id || `student_${s.name}_${s.groupName}_${selectedAcademicYear}`.replace(/\s+/g, '_').toLowerCase();
+          const studentWithId = { ...s, id: studentId };
+          toAdd.push(studentWithId);
           seenInImport.add(key);
         }
       });
 
       if (toAdd.length > 0) {
         setStudents(prev => [...prev, ...toAdd]);
+        if (useCloudSync) {
+          toAdd.forEach(s => fbAddStudent(s));
+        }
         
         // Auto-create group entries for any new groups discovered
         const newGroupEntries: Group[] = [];
@@ -2193,13 +2225,16 @@ export default function App() {
           if (!s.groupName) return;
           const key = `${String(s.yearGroup)}|${s.groupName}|${s.academicYear}`;
           if (!groupKeys.has(key)) {
-            newGroupEntries.push({
-              id: Math.random().toString(36).substr(2, 9),
+            const groupId = `group_${s.yearGroup}_${s.groupName}_${s.academicYear}`.replace(/\s+/g, '_');
+            const group = {
+              id: groupId,
               yearGroup: s.yearGroup,
               name: s.groupName,
               academicYear: s.academicYear
-            });
+            };
+            newGroupEntries.push(group);
             groupKeys.add(key);
+            if (useCloudSync) fbAddGroup(group);
           }
         });
         
@@ -2699,8 +2734,9 @@ export default function App() {
         const gKey = `${String(effectiveYearGroup)}|${effectiveGroupName}|${selectedAcademicYear}`;
         const groupKeys = new Set(newGroups.map(g => `${String(g.yearGroup)}|${g.name}|${g.academicYear}`));
         if (!groupKeys.has(gKey)) {
+          const groupId = `group_${effectiveYearGroup}_${effectiveGroupName}_${selectedAcademicYear}`.replace(/\s+/g, '_');
           newGroups.push({
-            id: Math.random().toString(36).substr(2, 9),
+            id: groupId,
             yearGroup: effectiveYearGroup,
             name: effectiveGroupName,
             academicYear: selectedAcademicYear
@@ -2711,8 +2747,9 @@ export default function App() {
       // Ensure student exists
       let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === effectiveYearGroup && s.academicYear === selectedAcademicYear);
       if (!student) {
+        const studentId = `student_${studentName}_${effectiveGroupName}_${selectedAcademicYear}`.replace(/\s+/g, '_').toLowerCase();
         student = { 
-          id: Math.random().toString(36).substr(2, 9), 
+          id: studentId, 
           name: studentName, 
           preferredName: String(preferredName).trim(),
           academicHouse: String(academicHouse).trim(),
@@ -2768,8 +2805,9 @@ export default function App() {
 
         let assessment = newAssessments.find(a => a.name.trim().toLowerCase() === rowAssessmentName.trim().toLowerCase() && a.yearGroup === yearGroup && a.subject === rowSubject && a.academicYear === selectedAcademicYear);
         if (!assessment) {
+          const assessmentId = `assessment_${rowAssessmentName}_${rowSubject}_${yearGroup}_${selectedAcademicYear}`.replace(/\s+/g, '_').toLowerCase();
           assessment = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: assessmentId,
             name: rowAssessmentName,
             subject: rowSubject,
             maxMarks: rowMaxMarks,
@@ -2785,7 +2823,7 @@ export default function App() {
           newMarks[existingMarkIdx].score = rowScore;
         } else {
           newMarks.push({ 
-            id: Math.random().toString(36).substr(2, 9),
+            id: getMarkId(student!.id, assessment.id),
             studentId: student!.id, 
             assessmentId: assessment.id, 
             score: rowScore 
@@ -2831,8 +2869,9 @@ export default function App() {
             a.academicYear === selectedAcademicYear
           );
           if (!assessment) {
+            const assessmentId = `assessment_${rowAssessmentName}_${rowSubject}_${yearGroup}_${selectedAcademicYear}`.replace(/\s+/g, '_').toLowerCase();
             assessment = {
-              id: Math.random().toString(36).substr(2, 9),
+              id: assessmentId,
               name: rowAssessmentName,
               subject: rowSubject,
               maxMarks: rowMaxMarks,
@@ -2859,9 +2898,10 @@ export default function App() {
               delete (newMarks[existingMarkIdx] as any).absent;
             }
           } else {
+            const id = getMarkId(student!.id, assessment.id);
             newMarks.push(isAbsent
-              ? { id: Math.random().toString(36).substr(2, 9), studentId: student!.id, assessmentId: assessment.id, score: 0, absent: true } as any
-              : { id: Math.random().toString(36).substr(2, 9), studentId: student!.id, assessmentId: assessment.id, score: rowScore }
+              ? { id, studentId: student!.id, assessmentId: assessment.id, score: 0, absent: true } as any
+              : { id, studentId: student!.id, assessmentId: assessment.id, score: rowScore }
             );
           }
         });
@@ -2871,8 +2911,9 @@ export default function App() {
         const rowScore = Math.min(defaultMaxMarks, Math.max(0, rowScoreRaw));
         let assessment = newAssessments.find(a => a.name.trim().toLowerCase() === defaultAssessmentName.trim().toLowerCase() && a.yearGroup === yearGroup && a.academicYear === selectedAcademicYear);
         if (!assessment) {
+          const assessmentId = `assessment_${defaultAssessmentName}_${defaultSubject}_${yearGroup}_${selectedAcademicYear}`.replace(/\s+/g, '_').toLowerCase();
           assessment = { 
-            id: Math.random().toString(36).substr(2, 9), 
+            id: assessmentId, 
             name: defaultAssessmentName, 
             subject: defaultSubject, 
             maxMarks: defaultMaxMarks,
@@ -2888,7 +2929,7 @@ export default function App() {
           newMarks[existingMarkIdx].score = rowScore;
         } else {
           newMarks.push({ 
-            id: Math.random().toString(36).substr(2, 9),
+            id: getMarkId(student!.id, assessment.id),
             studentId: student!.id, 
             assessmentId: assessment.id, 
             score: rowScore 
@@ -2901,6 +2942,19 @@ export default function App() {
     setStudents(newStudents);
     setAssessments(newAssessments);
     setMarks(newMarks);
+    
+    if (useCloudSync) {
+       // Save to Firebase in background
+       const saveCloud = async () => {
+         await Promise.all([
+           ...newGroups.map(g => fbAddGroup(g)),
+           ...newStudents.map(s => fbAddStudent(s)),
+           ...newAssessments.map(a => fbAddAssessment(a)),
+           ...newMarks.map(m => fbSetMark(m))
+         ]);
+       };
+       saveCloud();
+    }
     
     const newStudentCount = newStudents.length - students.length;
     const newAssessmentCount = newAssessments.length - assessments.length;
@@ -3051,16 +3105,20 @@ export default function App() {
   const handleAddAssessment = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingAssessmentId) {
+      const updated = { ...newAssessment };
       setAssessments(prev => prev.map(a => 
-        a.id === editingAssessmentId ? { ...a, ...newAssessment } : a
+        a.id === editingAssessmentId ? { ...a, ...updated } : a
       ));
+      if (useCloudSync) fbUpdateAssessment(editingAssessmentId, updated);
     } else {
+      const id = Math.random().toString(36).substr(2, 9);
       const assessment: Assessment = {
-        id: Math.random().toString(36).substr(2, 9),
+        id,
         ...newAssessment,
         academicYear: selectedAcademicYear
       };
       setAssessments(prev => [...prev, assessment]);
+      if (useCloudSync) fbAddAssessment(assessment);
     }
     setShowAssessmentModal(false);
     setEditingAssessmentId(null);
@@ -3080,17 +3138,22 @@ export default function App() {
     const studentSubjectLevels = (newStudent as any).subjectLevels || {};
 
     if (editingStudentId) {
-      setStudents(prev => prev.map(s => s.id === editingStudentId ? {
-        ...s,
+      const updated = {
         ...newStudent,
         subjects: studentSubjects,
         ...(Object.keys(studentSubjectLevels).length > 0 && { subjectLevels: studentSubjectLevels }),
         ibLevel: newStudent.ibLevel
+      };
+      setStudents(prev => prev.map(s => s.id === editingStudentId ? {
+        ...s,
+        ...updated
       } : s));
+      if (useCloudSync) fbUpdateStudent(editingStudentId, updated);
       setEditingStudentId(null);
     } else {
+      const id = Math.random().toString(36).substr(2, 9);
       const student: Student = {
-        id: Math.random().toString(36).substr(2, 9),
+        id,
         ...newStudent,
         academicYear: selectedAcademicYear,
         subjects: studentSubjects,
@@ -3098,6 +3161,7 @@ export default function App() {
         ibLevel: (newStudent.yearGroup === '12 IB' || newStudent.yearGroup === '13 IB') ? newStudent.ibLevel : undefined
       };
       setStudents(prev => [...prev, student]);
+      if (useCloudSync) fbAddStudent(student);
     }
     
     setShowStudentModal(false);
@@ -3129,9 +3193,14 @@ export default function App() {
     if (absent) {
       const newScore = 0;
       if (existingMark) {
-        setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, absent: true, score: newScore } : m));
+        const updated = { ...existingMark, absent: true, score: newScore };
+        setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+        if (useCloudSync) fbSetMark(updated);
       } else {
-        setMarks(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), studentId, assessmentId, score: newScore, absent: true } as any]);
+        const id = getMarkId(studentId, assessmentId);
+        const mark = { id, studentId, assessmentId, score: newScore, absent: true } as any;
+        setMarks(prev => [...prev, mark]);
+        if (useCloudSync) fbSetMark(mark);
       }
     } else {
       if (existingMark) {
@@ -3142,6 +3211,7 @@ export default function App() {
           const updated = { ...existingMark };
           delete (updated as any).absent;
           setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+          if (useCloudSync) fbSetMark(updated);
         }
       }
     }
@@ -3167,14 +3237,19 @@ export default function App() {
     const validatedScore = Math.min(maxMarks, Math.max(0, score));
     
     if (existingMark) {
-      setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, score: validatedScore } : m));
+      const updated = { ...existingMark, score: validatedScore };
+      setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+      if (useCloudSync) fbSetMark(updated);
     } else {
-      setMarks(prev => [...prev, { 
-        id: Math.random().toString(36).substr(2, 9),
+      const id = getMarkId(studentId, assessmentId);
+      const mark = { 
+        id,
         studentId, 
         assessmentId, 
         score: validatedScore 
-      }]);
+      };
+      setMarks(prev => [...prev, mark]);
+      if (useCloudSync) fbSetMark(mark);
     }
   };
 
@@ -3216,6 +3291,7 @@ export default function App() {
         const updated = { ...existingMark };
         delete (updated as any).resitScore;
         setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+        if (useCloudSync) fbSetMark(updated);
       }
       return;
     }
@@ -3225,15 +3301,20 @@ export default function App() {
     const validatedScore = Math.min(maxMarks, Math.max(0, resitScore));
     
     if (existingMark) {
-      setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, resitScore: validatedScore } : m));
+      const updated = { ...existingMark, resitScore: validatedScore };
+      setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+      if (useCloudSync) fbSetMark(updated);
     } else {
-      setMarks(prev => [...prev, { 
-        id: Math.random().toString(36).substr(2, 9),
+      const id = getMarkId(studentId, assessmentId);
+      const mark = { 
+        id,
         studentId, 
         assessmentId, 
         score: 0,
         resitScore: validatedScore 
-      }]);
+      };
+      setMarks(prev => [...prev, mark]);
+      if (useCloudSync) fbSetMark(mark);
     }
   };
 
@@ -3245,12 +3326,15 @@ export default function App() {
         const updated = { ...existingMark };
         delete (updated as any).resitMaxMarks;
         setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+        if (useCloudSync) fbSetMark(updated);
       }
       return;
     }
 
     if (existingMark) {
-      setMarks(prev => prev.map(m => m.id === existingMark.id ? { ...m, resitMaxMarks: resitMax } : m));
+      const updated = { ...existingMark, resitMaxMarks: resitMax };
+      setMarks(prev => prev.map(m => m.id === existingMark.id ? updated : m));
+      if (useCloudSync) fbSetMark(updated);
     }
   };
 
@@ -5145,7 +5229,7 @@ export default function App() {
                       
                       const markedCount = uniqueMarksMap.size;
                       const avg = markedCount > 0
-                        ? Array.from(uniqueMarksMap.values()).reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / markedCount
+                        ? Array.from(uniqueMarksMap.values()).reduce((acc, m) => acc + getMarkPercentage(m, assessment), 0) / markedCount
                         : null;
                       
                       // unmarked = students in this year group with no mark record at all
@@ -5598,64 +5682,104 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-6">
                   {groups
-                    .filter(g => String(g.yearGroup) === String(selectedSettingScope) && g.academicYear === selectedAcademicYear)
-                    .map((group) => (
-                      <div key={group.id} className="card p-4 flex flex-col gap-3 group relative">
-                        <div className="flex items-center gap-3">
-                          <input 
-                            type="text"
-                            className="flex-1 bg-slate-100 rounded-lg px-3 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                            value={group.name}
-                            onChange={(e) => {
-                              const newName = e.target.value;
-                              setGroups(prev => prev.map(g => g.id === group.id ? { ...g, name: newName } : g));
-                              // Also update students in this group
-                              setStudents(prev => prev.map(s => String(s.yearGroup) === String(group.yearGroup) && s.groupName === group.name ? { ...s, groupName: newName } : s));
-                            }}
-                            placeholder="Group Name"
-                          />
-                          <button 
-                            onClick={() => handleDeleteGroup(group.id)}
-                            className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Year:</span>
-                          <select
-                            className="text-xs bg-white border border-slate-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
-                            value={group.yearGroup}
-                            onChange={(e) => {
-                              const newYear = e.target.value as YearGroup;
-                              const parsedYear = isNaN(Number(newYear)) ? newYear : Number(newYear) as YearGroup;
-                              
-                              setGroups(prev => prev.map(g => g.id === group.id ? { ...g, yearGroup: parsedYear } : g));
-                              // Also update students in this group
-                              setStudents(prev => prev.map(s => String(s.yearGroup) === String(group.yearGroup) && s.groupName === group.name ? { ...s, yearGroup: parsedYear } : s));
-                            }}
-                          >
-                            {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
-                              <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
-                            ))}
-                          </select>
-                        </div>
-                        {(group.yearGroup === '12 IB' || group.yearGroup === '13 IB') && (
-                          <div className="flex gap-2 border-t border-slate-50 pt-2">
-                            <span className="text-[9px] bg-violet-50 text-violet-600 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
-                              <span className="w-1 h-1 rounded-full bg-violet-400"></span>
-                              HL: {students.filter(s => s.groupName === group.name && String(s.yearGroup) === String(group.yearGroup) && s.ibLevel === 'HL' && s.academicYear === selectedAcademicYear).length}
-                            </span>
-                            <span className="text-[9px] bg-sky-50 text-sky-600 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
-                              <span className="w-1 h-1 rounded-full bg-sky-400"></span>
-                              SL: {students.filter(s => s.groupName === group.name && String(s.yearGroup) === String(group.yearGroup) && s.ibLevel === 'SL' && s.academicYear === selectedAcademicYear).length}
-                            </span>
+                    .filter(g => {
+                      const scope = selectedSettingScope;
+                      // If scope is a specific group name, only show that group
+                      if (groups.some(existing => existing.name === scope)) {
+                        return g.name === scope && g.academicYear === selectedAcademicYear;
+                      }
+                      // Otherwise filter by year group
+                      return String(g.yearGroup) === String(scope) && g.academicYear === selectedAcademicYear;
+                    })
+                    .map((group) => {
+                      const groupStudents = students.filter(s => 
+                        s.groupName === group.name && 
+                        String(s.yearGroup) === String(group.yearGroup) &&
+                        s.academicYear === selectedAcademicYear
+                      );
+                      
+                      const studentAverages = groupStudents.map(s => {
+                        const studentMarks = marks.filter(m => m.studentId === s.id);
+                        const sittingMarks = studentMarks.filter(m => !(m as any).absent);
+                        if (sittingMarks.length === 0) return null;
+                        
+                        const totalPerc = sittingMarks.reduce((acc, m) => {
+                          const assessment = assessments.find(a => a.id === m.assessmentId);
+                          return acc + getMarkPercentage(m, assessment);
+                        }, 0);
+                        return totalPerc / sittingMarks.length;
+                      }).filter((v): v is number => v !== null);
+
+                      const groupAvg = studentAverages.length > 0
+                        ? studentAverages.reduce((a, b) => a + b, 0) / studentAverages.length
+                        : null;
+
+                      return (
+                        <div key={group.id} className="card p-5 flex flex-col gap-4 group relative border-slate-100 hover:border-indigo-200 transition-all">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <input 
+                                type="text"
+                                className="w-full bg-transparent border-none p-0 font-bold text-lg text-slate-800 outline-none focus:ring-0"
+                                value={group.name}
+                                onChange={(e) => {
+                                  const newName = e.target.value;
+                                  setGroups(prev => prev.map(g => g.id === group.id ? { ...g, name: newName } : g));
+                                  setStudents(prev => prev.map(s => String(s.yearGroup) === String(group.yearGroup) && s.groupName === group.name ? { ...s, groupName: newName } : s));
+                                }}
+                                placeholder="Group Name"
+                              />
+                            </div>
+                            <button 
+                              onClick={() => handleDeleteGroup(group.id)}
+                              className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
-                        )}
-                      </div>
-                    ))}
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-100">
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Average Score</p>
+                              <p className="text-lg font-bold text-indigo-600">
+                                {groupAvg !== null ? `${groupAvg.toFixed(1)}%` : '—'}
+                              </p>
+                            </div>
+                            <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-100">
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Students</p>
+                              <p className="text-lg font-bold text-slate-700">{groupStudents.length}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-2 border-t border-slate-50">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Year:</span>
+                            <select
+                              className="text-xs bg-white border border-slate-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
+                              value={group.yearGroup}
+                              onChange={(e) => {
+                                const newYear = e.target.value as YearGroup;
+                                const parsedYear = isNaN(Number(newYear)) ? newYear : Number(newYear) as YearGroup;
+                                setGroups(prev => prev.map(g => g.id === group.id ? { ...g, yearGroup: parsedYear } : g));
+                                setStudents(prev => prev.map(s => String(s.yearGroup) === String(group.yearGroup) && s.groupName === group.name ? { ...s, yearGroup: parsedYear } : s));
+                              }}
+                            >
+                              {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB', 'Graduated'].map(y => (
+                                <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                              ))}
+                            </select>
+                          </div>
+                          
+                          {(group.yearGroup === '12 IB' || group.yearGroup === '13 IB') && (
+                            <div className="flex gap-2 text-[10px] font-bold">
+                              <span className="text-violet-600">HL: {groupStudents.filter(s => s.ibLevel === 'HL').length}</span>
+                              <span className="text-sky-600">SL: {groupStudents.filter(s => s.ibLevel === 'SL').length}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               </div>
 
