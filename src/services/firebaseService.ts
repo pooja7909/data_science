@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, query, where, getDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, query, where, getDoc, onSnapshot } from 'firebase/firestore';
 import { Student, Assessment, Mark, Group, GradeBoundary } from '../types';
 import { auth } from '../firebase';
 
@@ -56,10 +56,28 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 
 export { doc, setDoc };
 
+export const getMarkId = (studentId: string, assessmentId: string) => `mark_${studentId}_${assessmentId}`;
+
+export const subscribeToData = (
+  collectionName: string, 
+  callback: (data: any[]) => void
+) => {
+  if (!auth.currentUser) return () => {};
+  
+  const q = query(collection(db, collectionName));
+  
+  return onSnapshot(q, (snapshot) => {
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    callback(data);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, collectionName);
+  });
+};
+
 export const getStudents = async () => {
   try {
     if (!auth.currentUser) return [];
-    const q = query(collection(db, 'students'), where('teacherId', '==', auth.currentUser.uid));
+    const q = query(collection(db, 'students'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
   } catch (error) {
@@ -67,13 +85,18 @@ export const getStudents = async () => {
   }
 };
 
-export const addStudent = async (student: Omit<Student, 'id' | 'teacherId'>) => {
+export const addStudent = async (student: Student) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    return await addDoc(collection(db, 'students'), {
+    const id = student.id || Math.random().toString(36).substr(2, 9);
+    const data = {
       ...student,
-      teacherId: auth.currentUser.uid
-    });
+      id,
+      createdBy: auth.currentUser.uid,
+      createdAt: new Date().toISOString()
+    };
+    await setDoc(doc(db, 'students', id), data);
+    return id;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'students');
   }
@@ -81,7 +104,12 @@ export const addStudent = async (student: Omit<Student, 'id' | 'teacherId'>) => 
 
 export const updateStudent = async (id: string, student: Partial<Student>) => {
   try {
-    await updateDoc(doc(db, 'students', id), student);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    await updateDoc(doc(db, 'students', id), {
+      ...student,
+      lastUpdatedBy: auth.currentUser.uid,
+      updatedAt: new Date().toISOString()
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `students/${id}`);
   }
@@ -98,7 +126,7 @@ export const deleteStudent = async (id: string) => {
 export const getAssessments = async () => {
   try {
     if (!auth.currentUser) return [];
-    const q = query(collection(db, 'assessments'), where('teacherId', '==', auth.currentUser.uid));
+    const q = query(collection(db, 'assessments'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Assessment));
   } catch (error) {
@@ -106,13 +134,18 @@ export const getAssessments = async () => {
   }
 };
 
-export const addAssessment = async (assessment: Omit<Assessment, 'id' | 'teacherId'>) => {
+export const addAssessment = async (assessment: Assessment) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    return await addDoc(collection(db, 'assessments'), {
+    const id = assessment.id || Math.random().toString(36).substr(2, 9);
+    const data = {
       ...assessment,
-      teacherId: auth.currentUser.uid
-    });
+      id,
+      createdBy: auth.currentUser.uid,
+      createdAt: new Date().toISOString()
+    };
+    await setDoc(doc(db, 'assessments', id), data);
+    return id;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'assessments');
   }
@@ -120,7 +153,12 @@ export const addAssessment = async (assessment: Omit<Assessment, 'id' | 'teacher
 
 export const updateAssessment = async (id: string, assessment: Partial<Assessment>) => {
   try {
-    await updateDoc(doc(db, 'assessments', id), assessment);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    await updateDoc(doc(db, 'assessments', id), {
+      ...assessment,
+      lastUpdatedBy: auth.currentUser.uid,
+      updatedAt: new Date().toISOString()
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `assessments/${id}`);
   }
@@ -137,7 +175,7 @@ export const deleteAssessment = async (id: string) => {
 export const getMarks = async () => {
   try {
     if (!auth.currentUser) return [];
-    const q = query(collection(db, 'marks'), where('teacherId', '==', auth.currentUser.uid));
+    const q = query(collection(db, 'marks'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mark));
   } catch (error) {
@@ -145,23 +183,23 @@ export const getMarks = async () => {
   }
 };
 
-export const addMark = async (mark: Omit<Mark, 'id' | 'teacherId'>) => {
+export const setMark = async (mark: Mark) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    return await addDoc(collection(db, 'marks'), {
+    const id = mark.id || getMarkId(mark.studentId, mark.assessmentId);
+    
+    // In a shared team environment, we prioritize syncing over individual ownership
+    const data = {
       ...mark,
-      teacherId: auth.currentUser.uid
-    });
+      id,
+      lastUpdatedBy: auth.currentUser.uid,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await setDoc(doc(db, 'marks', id), data);
+    return id;
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, 'marks');
-  }
-};
-
-export const updateMark = async (id: string, mark: Partial<Mark>) => {
-  try {
-    await updateDoc(doc(db, 'marks', id), mark);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `marks/${id}`);
+    handleFirestoreError(error, OperationType.WRITE, 'marks');
   }
 };
 
@@ -176,7 +214,7 @@ export const deleteMark = async (id: string) => {
 export const getGroups = async () => {
   try {
     if (!auth.currentUser) return [];
-    const q = query(collection(db, 'groups'), where('teacherId', '==', auth.currentUser.uid));
+    const q = query(collection(db, 'groups'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
   } catch (error) {
@@ -184,13 +222,18 @@ export const getGroups = async () => {
   }
 };
 
-export const addGroup = async (group: Omit<Group, 'id' | 'teacherId'>) => {
+export const addGroup = async (group: Group) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    return await addDoc(collection(db, 'groups'), {
+    const id = group.id || Math.random().toString(36).substr(2, 9);
+    const data = {
       ...group,
-      teacherId: auth.currentUser.uid
-    });
+      id,
+      createdBy: auth.currentUser.uid,
+      createdAt: new Date().toISOString()
+    };
+    await setDoc(doc(db, 'groups', id), data);
+    return id;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, 'groups');
   }
@@ -198,7 +241,12 @@ export const addGroup = async (group: Omit<Group, 'id' | 'teacherId'>) => {
 
 export const updateGroup = async (id: string, group: Partial<Group>) => {
   try {
-    await updateDoc(doc(db, 'groups', id), group);
+    if (!auth.currentUser) throw new Error("Logged in user required");
+    await updateDoc(doc(db, 'groups', id), {
+      ...group,
+      lastUpdatedBy: auth.currentUser.uid,
+      updatedAt: new Date().toISOString()
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `groups/${id}`);
   }
@@ -212,20 +260,31 @@ export const deleteGroup = async (id: string) => {
   }
 };
 
+export const subscribeToConfig = (callback: (data: any) => void) => {
+  if (!auth.currentUser) return () => {};
+  return onSnapshot(doc(db, 'config', 'shared_settings'), (snapshot) => {
+    if (snapshot.exists()) {
+      callback(snapshot.data());
+    }
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, 'config/shared_settings');
+  });
+};
+
 export const getYearBoundaries = async () => {
   try {
     if (!auth.currentUser) return null;
-    const boundariesDoc = await getDoc(doc(db, 'config', auth.currentUser.uid));
-    return boundariesDoc.exists() ? boundariesDoc.data() as Record<string, GradeBoundary[]> : null;
+    const boundariesDoc = await getDoc(doc(db, 'config', 'shared_settings'));
+    return boundariesDoc.exists() ? boundariesDoc.data() : null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'config');
   }
 };
 
-export const updateYearBoundaries = async (boundaries: Record<string, GradeBoundary[]>) => {
+export const updateYearBoundaries = async (data: any) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    await setDoc(doc(db, 'config', auth.currentUser.uid), boundaries);
+    await setDoc(doc(db, 'config', 'shared_settings'), data);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, 'config');
   }
