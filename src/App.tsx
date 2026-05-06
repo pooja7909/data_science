@@ -374,6 +374,7 @@ export default function App() {
     return saved === null ? true : saved === 'true';
   });
   const isFetching = React.useRef(false);
+  const lastSyncedConfigRef = React.useRef<string>("");
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['year-7'])); // Default Year 7 expanded
 
@@ -533,6 +534,7 @@ export default function App() {
           }
           if (fbGroups && fbGroups.length > 0) setGroups(fbGroups);
           if (fbBoundaries) {
+            lastSyncedConfigRef.current = JSON.stringify(fbBoundaries);
             if (fbBoundaries.boundaries) setYearBoundaries(fbBoundaries.boundaries);
             if (fbBoundaries.locks) setLockedYearBoundaries(fbBoundaries.locks);
           }
@@ -592,6 +594,7 @@ export default function App() {
 
     const unsubConfig = subscribeToConfig((data) => {
       if (data) {
+        lastSyncedConfigRef.current = JSON.stringify(data);
         if (data.boundaries) setYearBoundaries(data.boundaries);
         if (data.locks) setLockedYearBoundaries(data.locks);
       }
@@ -625,13 +628,20 @@ export default function App() {
   useEffect(() => {
     if (!hasLoaded || !useCloudSync || isFetching.current || !auth.currentUser) return;
 
+    const currentConfigObj = {
+      boundaries: yearBoundaries,
+      locks: lockedYearBoundaries
+    };
+    const currentConfigStr = JSON.stringify(currentConfigObj);
+    
+    // Only save if different from what's on the server
+    if (currentConfigStr === lastSyncedConfigRef.current) return;
+
     const saveConfig = async () => {
       setSaveStatus('saving');
       try {
-        await updateYearBoundaries({
-          boundaries: yearBoundaries,
-          locks: lockedYearBoundaries
-        });
+        await updateYearBoundaries(currentConfigObj);
+        lastSyncedConfigRef.current = currentConfigStr;
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 3000);
       } catch (error) {
