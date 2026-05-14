@@ -54,6 +54,27 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+const cleanData = (obj: any): any => {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj
+      .map(v => cleanData(v))
+      .filter(v => v !== undefined);
+  }
+
+  const newObj: any = {};
+  Object.keys(obj).forEach(key => {
+    const value = cleanData(obj[key]);
+    if (value !== undefined) {
+      newObj[key] = value;
+    }
+  });
+  return newObj;
+};
+
 export { doc, setDoc };
 
 export const getMarkId = (studentId: string, assessmentId: string) => `mark_${studentId}_${assessmentId}`;
@@ -89,12 +110,12 @@ export const addStudent = async (student: Student) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
     const id = student.id || Math.random().toString(36).substr(2, 9);
-    const data = {
+    const data = cleanData({
       ...student,
       id,
       createdBy: auth.currentUser.uid,
       createdAt: new Date().toISOString()
-    };
+    });
     await setDoc(doc(db, 'students', id), data);
     return id;
   } catch (error) {
@@ -105,11 +126,11 @@ export const addStudent = async (student: Student) => {
 export const updateStudent = async (id: string, student: Partial<Student>) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    await updateDoc(doc(db, 'students', id), {
+    await updateDoc(doc(db, 'students', id), cleanData({
       ...student,
       lastUpdatedBy: auth.currentUser.uid,
       updatedAt: new Date().toISOString()
-    });
+    }));
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `students/${id}`);
   }
@@ -138,12 +159,12 @@ export const addAssessment = async (assessment: Assessment) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
     const id = assessment.id || Math.random().toString(36).substr(2, 9);
-    const data = {
+    const data = cleanData({
       ...assessment,
       id,
       createdBy: auth.currentUser.uid,
       createdAt: new Date().toISOString()
-    };
+    });
     await setDoc(doc(db, 'assessments', id), data);
     return id;
   } catch (error) {
@@ -154,11 +175,11 @@ export const addAssessment = async (assessment: Assessment) => {
 export const updateAssessment = async (id: string, assessment: Partial<Assessment>) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    await updateDoc(doc(db, 'assessments', id), {
+    await updateDoc(doc(db, 'assessments', id), cleanData({
       ...assessment,
       lastUpdatedBy: auth.currentUser.uid,
       updatedAt: new Date().toISOString()
-    });
+    }));
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `assessments/${id}`);
   }
@@ -189,12 +210,12 @@ export const setMark = async (mark: Mark) => {
     const id = mark.id || getMarkId(mark.studentId, mark.assessmentId);
     
     // In a shared team environment, we prioritize syncing over individual ownership
-    const data = {
+    const data = cleanData({
       ...mark,
       id,
       lastUpdatedBy: auth.currentUser.uid,
       updatedAt: new Date().toISOString()
-    };
+    });
     
     await setDoc(doc(db, 'marks', id), data);
     return id;
@@ -226,12 +247,12 @@ export const addGroup = async (group: Group) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
     const id = group.id || Math.random().toString(36).substr(2, 9);
-    const data = {
+    const data = cleanData({
       ...group,
       id,
       createdBy: auth.currentUser.uid,
       createdAt: new Date().toISOString()
-    };
+    });
     await setDoc(doc(db, 'groups', id), data);
     return id;
   } catch (error) {
@@ -242,11 +263,11 @@ export const addGroup = async (group: Group) => {
 export const updateGroup = async (id: string, group: Partial<Group>) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    await updateDoc(doc(db, 'groups', id), {
+    await updateDoc(doc(db, 'groups', id), cleanData({
       ...group,
       lastUpdatedBy: auth.currentUser.uid,
       updatedAt: new Date().toISOString()
-    });
+    }));
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `groups/${id}`);
   }
@@ -284,7 +305,7 @@ export const getYearBoundaries = async () => {
 export const updateYearBoundaries = async (data: any) => {
   try {
     if (!auth.currentUser) throw new Error("Logged in user required");
-    await setDoc(doc(db, 'config', 'shared_settings'), data);
+    await setDoc(doc(db, 'config', 'shared_settings'), cleanData(data));
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, 'config');
   }
