@@ -176,7 +176,19 @@ const getPreviousYearGroup = (current: YearGroup | 'Graduated'): YearGroup | nul
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'performance' | 'students' | 'assessments' | 'settings' | 'concerns'>('dashboard');
-  const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(CURRENT_ACADEMIC_YEAR);
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('science-tracker-academic-year');
+      return saved || CURRENT_ACADEMIC_YEAR;
+    } catch (e) {
+      return CURRENT_ACADEMIC_YEAR;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('science-tracker-academic-year', selectedAcademicYear);
+  }, [selectedAcademicYear]);
+
   const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
   const [assessments, setAssessments] = useState<Assessment[]>(INITIAL_ASSESSMENTS);
   const [marks, setMarks] = useState<Mark[]>(INITIAL_MARKS);
@@ -327,7 +339,8 @@ export default function App() {
     // Comprehensive mapping for different curriculum scales
     const mapping: Record<string, number> = {
       // Alphabetic to Numeric (9-1 equivalent scale)
-      'A*': 9, 'A': 8, 'B': 7, 'C': 6, 'D': 5, 'E': 4, 'F': 3, 'G': 2, 'U': 0,
+      'A*': 9, 'A': 8, 'B': 7, 'C': 6, 'D': 5, 'E': 4, 'F': 3, 'G': 2, 'U': 0, 'X': 0,
+      'A+': 9, 'A-': 7.5, 'B+': 7, 'B-': 5.5, 'C+': 5, 'C-': 3.5,
       
       // IGCSE / GCSE Legacy
       'A_STAR': 9, 'A* ': 9, 
@@ -335,6 +348,7 @@ export default function App() {
       // Primary / Assessment for Learning scales
       'OUTSTANDING': 6, 'SIGNIFICANTLY ABOVE': 5, 'ABOVE': 4, 'AT': 3, 'BELOW': 2, 'SIGNIFICANTLY BELOW': 1,
       'EXCEEDING': 6, 'EXPECTED': 3, 'WORKING TOWARDS': 1,
+      'WA': 7, 'WTG': 5, 'BLW': 3,
       
       // IB scales (if they happen to be mixed)
       '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2, '1': 1
@@ -535,9 +549,22 @@ export default function App() {
             getYearBoundaries()
           ]);
           
-          if (fbStudents) setStudents(fbStudents);
-          if (fbAssessments) setAssessments(fbAssessments);
-          if (fbMarks) {
+          if (fbStudents && fbStudents.length > 0) {
+            setStudents(fbStudents);
+          } else if (fbStudents && students.length > 0) {
+            // If cloud is empty but we have local data, push local data to cloud
+            console.log("Pushing local students to empty cloud...");
+            Promise.all(students.map(s => fbAddStudent(s)));
+          }
+
+          if (fbAssessments && fbAssessments.length > 0) {
+            setAssessments(fbAssessments);
+          } else if (fbAssessments && assessments.length > 0) {
+            console.log("Pushing local assessments to empty cloud...");
+            Promise.all(assessments.map(a => fbAddAssessment(a)));
+          }
+
+          if (fbMarks && fbMarks.length > 0) {
             const uniqueMarks: Mark[] = [];
             const markKeys = new Set<string>();
             fbMarks.forEach(m => {
@@ -548,8 +575,17 @@ export default function App() {
               }
             });
             setMarks(uniqueMarks);
+          } else if (fbMarks && marks.length > 0) {
+            console.log("Pushing local marks to empty cloud...");
+            Promise.all(marks.map(m => fbSetMark(m)));
           }
-          if (fbGroups) setGroups(fbGroups);
+
+          if (fbGroups && fbGroups.length > 0) {
+            setGroups(fbGroups);
+          } else if (fbGroups && groups.length > 0) {
+            console.log("Pushing local groups to empty cloud...");
+            Promise.all(groups.map(g => fbAddGroup(g)));
+          }
           if (fbBoundaries) {
             lastSyncedConfigRef.current = JSON.stringify(fbBoundaries);
             if (fbBoundaries.boundaries) setYearBoundaries(fbBoundaries.boundaries);
@@ -4555,6 +4591,11 @@ export default function App() {
                               </div>
                             </th>
                             <th 
+                              className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200"
+                            >
+                              Base
+                            </th>
+                            <th 
                               className="py-3 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-r border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors"
                               onClick={() => setMarksheetSort(prev => ({ key: 'avg', direction: prev.key === 'avg' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
                             >
@@ -4611,11 +4652,16 @@ export default function App() {
                                           <AlertCircle className="w-3 h-3 text-rose-500" />
                                         )}
                                       </div>
-                                      {p.student.isNew && (
-                                        <span className="text-[7px] font-black text-amber-600 uppercase tracking-tighter leading-none">Joined Late</span>
-                                      )}
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[9px] font-bold text-indigo-500">{p.student.baselineGrade || 'BL?'}</span>
+                                        <span className="text-[9px] text-slate-300">|</span>
+                                        <span className="text-[9px] text-slate-400 truncate">{p.student.groupName}</span>
+                                      </div>
                                     </div>
                                   </div>
+                                </td>
+                                <td className="py-2.5 px-2 text-center border-r border-slate-200 bg-slate-50/20 font-black text-indigo-600 text-xs">
+                                  {p.student.baselineGrade || '—'}
                                 </td>
                                 <td className="py-2.5 px-2 text-center border-r border-slate-200">
                                   {p.hasData ? (
