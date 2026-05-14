@@ -11,7 +11,12 @@
         "yearGroup": { "type": "string" },
         "groupName": { "type": "string" },
         "academicYear": { "type": "string" },
-        "ibLevel": { "type": "string", "enum": ["HL", "SL"] }
+        "ibLevel": { "type": "string", "enum": ["HL", "SL"] },
+        "baselineGrade": { "type": "string" },
+        "isNew": { "type": "boolean" },
+        "notes": { "type": "string" },
+        "subjects": { "type": "array", "items": { "type": "string" } },
+        "subjectLevels": { "type": "object" }
       },
       "required": ["id", "name", "yearGroup", "groupName", "academicYear"]
     },
