@@ -354,6 +354,15 @@ export default function App() {
       '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2, '1': 1
     };
     
+    // Handle split grades (e.g., A/B or A*/A)
+    if (cleanGrade.includes('/')) {
+      const parts = cleanGrade.split('/');
+      const values = parts.map(p => gradeToPoints(p.trim())).filter(v => v > 0);
+      if (values.length > 0) {
+        return values.reduce((a, b) => a + b, 0) / values.length;
+      }
+    }
+    
     return mapping[cleanGrade] || 0;
   };
 
