@@ -317,14 +317,30 @@ export default function App() {
   const [performanceDisplayMode, setPerformanceDisplayMode] = useState<'percentage' | 'points'>('percentage');
 
   const gradeToPoints = (grade: string) => {
-    const num = parseInt(grade);
-    if (!isNaN(num)) return num;
+    if (!grade) return 0;
+    const cleanGrade = grade.trim().toUpperCase();
+    
+    // First try standard numeric parsing (for 1-9, level 1-7, etc.)
+    const num = parseInt(cleanGrade);
+    if (!isNaN(num) && /^\d+$/.test(cleanGrade)) return num;
+    
+    // Comprehensive mapping for different curriculum scales
     const mapping: Record<string, number> = {
+      // Alphabetic to Numeric (9-1 equivalent scale)
       'A*': 9, 'A': 8, 'B': 7, 'C': 6, 'D': 5, 'E': 4, 'F': 3, 'G': 2, 'U': 0,
+      
+      // IGCSE / GCSE Legacy
+      'A_STAR': 9, 'A* ': 9, 
+      
+      // Primary / Assessment for Learning scales
       'OUTSTANDING': 6, 'SIGNIFICANTLY ABOVE': 5, 'ABOVE': 4, 'AT': 3, 'BELOW': 2, 'SIGNIFICANTLY BELOW': 1,
-      'EXCEEDING': 6, 'WORKING TOWARDS': 1
+      'EXCEEDING': 6, 'EXPECTED': 3, 'WORKING TOWARDS': 1,
+      
+      // IB scales (if they happen to be mixed)
+      '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2, '1': 1
     };
-    return mapping[grade.toUpperCase()] || 0;
+    
+    return mapping[cleanGrade] || 0;
   };
 
   const getStudentBoundaries = (student: Student) => {
