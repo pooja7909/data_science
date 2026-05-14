@@ -2727,6 +2727,8 @@ export default function App() {
       'surname', 'lastname', 'forename', 'firstname', 'forenamefirstname',
       'yeargroup', 'year', 'yeargroupnc', 'groupname', 'group', 'class', 'yeargroupcode',
       'academichouse', 'house',
+      'baseline', 'baselinegrade', 'baseline grade', 'target', 'targetgrade', 'predicted', 
+      'ks2', 'ks3', 'cats', 'midyis', 'yellis',
       'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark', 'isnew', 'newstudent', 'latejoined',
       'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', 'sheetname'
     ];
@@ -2834,11 +2836,34 @@ export default function App() {
         }
       }
 
-      const baselineRaw = findValue(row, ['baseline', 'baselinegrade', 'baseline grade', 'target', 'targetgrade', 'predicted']);
+      const baselineRaw = findValue(row, [
+        'baseline', 'baselinegrade', 'baseline grade', 'target', 'targetgrade', 'predicted', 
+        'end of ks2', 'ks2', 'ks3', 'cats', 'midyis', 'yellis', 'working towards', 'expectation', 
+        defaultSubject, 'Comp Sci', 'CS', 'ICT'
+      ]);
       const baselineGrade = baselineRaw ? String(baselineRaw).trim().toUpperCase() : undefined;
 
       // Ensure student exists
-      let student = newStudents.find(s => s.name.trim().toLowerCase() === studentName.toLowerCase() && s.yearGroup === effectiveYearGroup && s.academicYear === selectedAcademicYear);
+      let student = newStudents.find(s => {
+        const sName = s.name.trim().toLowerCase();
+        const rName = studentName.toLowerCase();
+        
+        let isNameMatch = false;
+        if (sName === rName) {
+          isNameMatch = true;
+        } else {
+          const parts = rName.split(' ');
+          if (parts.length >= 2) {
+            const flipped1 = `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(' ')}`.toLowerCase();
+            const flipped2 = `${parts.slice(0, -1).join(' ')}, ${parts[parts.length - 1]}`.toLowerCase();
+            if (sName === flipped1 || sName === flipped2) {
+              isNameMatch = true;
+            }
+          }
+        }
+        
+        return isNameMatch && s.yearGroup === effectiveYearGroup && s.academicYear === selectedAcademicYear;
+      });
       if (!student) {
         const studentId = `student_${studentName}_${effectiveGroupName}_${selectedAcademicYear}`.replace(/\s+/g, '_').toLowerCase();
         student = { 
