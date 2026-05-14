@@ -535,9 +535,9 @@ export default function App() {
             getYearBoundaries()
           ]);
           
-          if (fbStudents && fbStudents.length > 0) setStudents(fbStudents);
-          if (fbAssessments && fbAssessments.length > 0) setAssessments(fbAssessments);
-          if (fbMarks && fbMarks.length > 0) {
+          if (fbStudents) setStudents(fbStudents);
+          if (fbAssessments) setAssessments(fbAssessments);
+          if (fbMarks) {
             const uniqueMarks: Mark[] = [];
             const markKeys = new Set<string>();
             fbMarks.forEach(m => {
@@ -549,7 +549,7 @@ export default function App() {
             });
             setMarks(uniqueMarks);
           }
-          if (fbGroups && fbGroups.length > 0) setGroups(fbGroups);
+          if (fbGroups) setGroups(fbGroups);
           if (fbBoundaries) {
             lastSyncedConfigRef.current = JSON.stringify(fbBoundaries);
             if (fbBoundaries.boundaries) setYearBoundaries(fbBoundaries.boundaries);
@@ -584,11 +584,11 @@ export default function App() {
     console.log("Setting up real-time sync with Firebase...");
     
     const unsubStudents = subscribeToData('students', (data) => {
-      if (data && data.length > 0) setStudents(data);
+      setStudents(data);
     });
     
     const unsubAssessments = subscribeToData('assessments', (data) => {
-      if (data && data.length > 0) setAssessments(data);
+      setAssessments(data);
     });
     
     const unsubMarks = subscribeToData('marks', (mData) => {
@@ -606,7 +606,7 @@ export default function App() {
     });
     
     const unsubGroups = subscribeToData('groups', (data) => {
-      if (data && data.length > 0) setGroups(data);
+      setGroups(data);
     });
 
     const unsubConfig = subscribeToConfig((data) => {
@@ -3463,6 +3463,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all ${
+              useCloudSync 
+                ? 'bg-emerald-50 border-emerald-100 text-emerald-600' 
+                : 'bg-slate-100 border-slate-200 text-slate-400'
+            }`}>
+              <Cloud className={`w-3.5 h-3.5 ${useCloudSync ? 'animate-pulse' : ''}`} />
+              <span className="text-[10px] font-bold uppercase tracking-wider">
+                {useCloudSync ? 'Cloud Synced' : 'Offline Mode'}
+              </span>
+            </div>
+
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Academic Year</span>
               <select 
