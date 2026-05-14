@@ -1074,9 +1074,12 @@ export default function App() {
         status,
         count: sittingMarks.length,         // only assessments actually sat
         totalCount: allStudentMarks.length,  // includes absent
-        absentCount: allStudentMarks.length - sittingMarks.length
+        absentCount: allStudentMarks.length - sittingMarks.length,
+        baselinePoints: student.baselineGrade ? gradeToPoints(student.baselineGrade) : null,
+        isConcern: student.baselineGrade ? (averagePoints <= gradeToPoints(student.baselineGrade) - 3) : false,
+        hasData: sittingMarks.length > 0
       };
-    }).filter(p => p.count > 0); // exclude students with no real marks at all
+    }).filter(p => p.count > 0); 
   }, [students, assessments, marks, performanceSubjectFilter, yearFilter, selectedAcademicYear, yearBoundaries]);
 
   const calculateGradeDistribution = (stats: any[]) => {
@@ -1158,7 +1161,7 @@ export default function App() {
     const wb = XLSX.utils.book_new();
     
     // Prepare headers
-    const headers = ['Student Name', 'Academic Year', 'Year Group', 'Class', 'Avg %', 'Avg Grade', 'Avg GP'];
+    const headers = ['Student Name', 'Baseline Grade', 'Academic Year', 'Year Group', 'Class', 'Avg %', 'Avg Grade', 'Avg GP'];
     performanceTabAssessments.forEach(a => {
       headers.push(`${a.name} (Mark)`);
       headers.push(`${a.name} (%)`);
@@ -1170,6 +1173,7 @@ export default function App() {
     const data = sortedMarksheetPerformances.map(p => {
       const row: any[] = [
         p.student.name,
+        p.student.baselineGrade || '—',
         p.student.academicYear,
         p.student.yearGroup,
         p.student.groupName,
@@ -2149,6 +2153,11 @@ export default function App() {
         const c = h.toLowerCase();
         return c.includes('group') || c.includes('class');
       });
+      const baselineIdx = headers.findIndex(h => {
+        if (typeof h !== 'string') return false;
+        const c = h.toLowerCase();
+        return c.includes('baseline');
+      });
       const subjectsIdx = headers.findIndex(h => {
         if (typeof h !== 'string') return false;
         const c = h.toLowerCase();
@@ -2219,6 +2228,7 @@ export default function App() {
           name: `${row[forenameIdx] || ''} ${row[surnameIdx] || ''}`.trim(),
           yearGroup,
           groupName: (groupIdx !== -1 ? String(row[groupIdx] || '') : guessedGroup) || '',
+          baselineGrade: baselineIdx !== -1 ? String(row[baselineIdx] || '').trim() : '',
           academicYear: selectedAcademicYear,
           subjects,
           ...(Object.keys(subjectLevels).length > 0 && { subjectLevels })
@@ -2356,13 +2366,13 @@ export default function App() {
 
     // ── Sheet 1: Students ───────────────────────────────────────────────────
     const studentData = [
-      ['Surname', 'Forename (Firstname)', 'Preferred Name', 'Year Group (NC)', 'Academic House', 'Year Group Code'],
-      ['Ahmed',   'Sarah',                'Sarah',          '8',               'Ruby',           '8x'],
-      ['Brown',   'James',                'Jim',            '10',              'Jade',           '10A'],
-      ['Clarke',  'Emma',                 'Emma',           '12',              'Topaz',          '12B'],
+      ['Surname', 'Forename (Firstname)', 'Preferred Name', 'Year Group (NC)', 'Academic House', 'Year Group Code', 'Baseline Grade'],
+      ['Ahmed',   'Sarah',                'Sarah',          '8',               'Ruby',           '8x',               '7'],
+      ['Brown',   'James',                'Jim',            '10',              'Jade',           '10A',              'A*'],
+      ['Clarke',  'Emma',                 'Emma',           '12',              'Topaz',          '12B',              '6'],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(studentData);
-    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
+    ws1['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 15 }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Students');
 
     // ── Sheet 2: Instructions ────────────────────────────────────────────────
@@ -2378,6 +2388,7 @@ export default function App() {
       ['Year Group (NC)',     'Year group (e.g. 7, 8, 9, 10, 11, 12, 13)'],
       ['Academic House',      'Student house affiliation'],
       ['Year Group Code',     'Class code e.g. 8x, 10A, 12B'],
+      ['Baseline Grade',      'Optional baseline grade for tracking (e.g. 7, A*)'],
       [''],
       ['TIPS'],
       ['• Delete the example rows before uploading.'],
@@ -3206,7 +3217,7 @@ export default function App() {
     }
     
     setShowStudentModal(false);
-    setNewStudent(prev => ({ ...prev, name: '', preferredName: '', ibLevel: undefined, isNew: false, notes: '', subjects: undefined, subjectLevels: undefined } as any)); // Keep yearGroup and groupName
+    setNewStudent(prev => ({ ...prev, name: '', preferredName: '', ibLevel: undefined, isNew: false, notes: '', baselineGrade: '', subjects: undefined, subjectLevels: undefined } as any)); // Keep yearGroup and groupName
   };
 
   const handleAddGrade = (isAssessment: boolean = false, assessmentId?: string) => {
