@@ -12,6 +12,7 @@ export interface Student {
   academicHouse?: string;
   isNew?: boolean;
   notes?: string;
+  baselineGrade?: string;
 }
 
 export interface Group {
@@ -62,7 +63,13 @@ export interface GradeBoundary {
 export interface StudentPerformance {
   student: Student;
   marks: (Mark & { assessment: Assessment })[];
+  sittingMarks: (Mark & { assessment: Assessment })[];
+  absentCount: number;
   averagePercentage: number;
+  averagePoints: number;
+  hasData: boolean;
   trend: 'improving' | 'declining' | 'stable';
-  status: 'excellent' | 'on-track' | 'needs-improvement';
+  status: 'excellent' | 'on-track' | 'needs-improvement' | 'no-data';
+  isConcern: boolean;
+  baselinePoints: number | null;
 }
