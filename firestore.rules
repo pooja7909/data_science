@@ -29,7 +29,13 @@ service cloud.firestore {
         && data.name is string && data.name.size() <= 300
         && (data.yearGroup is string || data.yearGroup is number)
         && data.groupName is string && data.groupName.size() <= 100
-        && data.academicYear is string && data.academicYear.size() <= 20;
+        && data.academicYear is string && data.academicYear.size() <= 20
+        && (!data.keys().hasAny(['baselineGrade']) || data.baselineGrade is string)
+        && (!data.keys().hasAny(['preferredName']) || data.preferredName is string)
+        && (!data.keys().hasAny(['notes']) || data.notes is string)
+        && (!data.keys().hasAny(['isNew']) || data.isNew is bool)
+        && (!data.keys().hasAny(['subjects']) || data.subjects is list)
+        && (!data.keys().hasAny(['subjectLevels']) || data.subjectLevels is map);
     }
 
     function isValidGroup(data) {
