@@ -2083,6 +2083,72 @@ export default function App() {
     });
   };
 
+  const consolidateStudents = async () => {
+    if (!confirm("This will merge students with identical names in the same Year Group. Marks will be consolidated into a single record. This cannot be undone. Proceed?")) return;
+
+    setSaveStatus('saving');
+    const duplicatesGrouped: { [key: string]: Student[] } = {};
+    
+    students.forEach(s => {
+      const normalize = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+      const key = `${normalize(s.name)}|${s.yearGroup}|${s.academicYear}`;
+      if (!duplicatesGrouped[key]) duplicatesGrouped[key] = [];
+      duplicatesGrouped[key].push(s);
+    });
+
+    const tasks = Object.values(duplicatesGrouped).filter(group => group.length > 1);
+    
+    if (tasks.length === 0) {
+      alert("No obvious duplicates found.");
+      setSaveStatus('idle');
+      return;
+    }
+
+    try {
+      for (const group of tasks) {
+        // First student is the master
+        const master = group[0];
+        const others = group.slice(1);
+
+        for (const duplicate of others) {
+          // 1. Collect marks for this duplicate
+          const duplicateMarks = marks.filter(m => m.studentId === duplicate.id);
+          
+          for (const mark of duplicateMarks) {
+            const hasExisting = marks.some(m => m.studentId === master.id && m.assessmentId === mark.assessmentId);
+            if (!hasExisting) {
+              // Move mark to master
+              const newMarkId = getMarkId(master.id, mark.assessmentId);
+              await fbSetMark({ ...mark, id: newMarkId, studentId: master.id });
+            }
+            // Delete duplicate's mark
+            await fbDeleteMark(mark.id);
+          }
+
+          // 2. Merge baseline if master is missing it
+          if (!master.baselineGrade && duplicate.baselineGrade) {
+            master.baselineGrade = duplicate.baselineGrade;
+            await fbUpdateStudent(master.id, { baselineGrade: duplicate.baselineGrade });
+          }
+
+          // 3. Delete duplicate
+          await fbDeleteStudent(duplicate.id);
+        }
+      }
+      
+      // Update local state to reflect changes (or just wait for sync if using subscriptions)
+      // Since we use useCloudSync, it should sync back automatically if those lists have subscriptions.
+      
+      alert(`Successfully merged ${tasks.length} student groups.`);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } catch (error) {
+      console.error("Consolidation error:", error);
+      alert("An error occurred. Check console for details.");
+      setSaveStatus('idle');
+    }
+  };
+
   const handleDeleteAssessment = async (assessmentId: string) => {
     setConfirmModal({
       isOpen: true,
@@ -2727,11 +2793,12 @@ export default function App() {
       'surname', 'lastname', 'forename', 'firstname', 'forenamefirstname',
       'yeargroup', 'year', 'yeargroupnc', 'groupname', 'group', 'class', 'yeargroupcode',
       'academichouse', 'house',
-      'baseline', 'baselinegrade', 'baseline grade', 'target', 'targetgrade', 'predicted', 
-      'ks2', 'ks3', 'cats', 'midyis', 'yellis',
+      'baseline', 'baselinegrade', 'baselinegrade', 'target', 'targetgrade', 'predicted', 
+      'ks2', 'ks3', 'cats', 'midyis', 'yellis', 'endofks2', 'ks2', 'ks3', 'cats', 'midyis', 'yellis', 'workingtowards', 'expectation',
+      'compsci', 'cs', 'ict', 'computerscience',
       'subject', 'subjects', 'level', 'iblevel', 'date', 'maxmarks', 'assessmentname', 'score', 'mark', 'isnew', 'newstudent', 'latejoined',
       'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', 'sheetname'
-    ];
+    ].map(k => normalizeKey(k));
 
     const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
     const scoreColumns: string[] = headers.filter(h => {
@@ -2839,29 +2906,34 @@ export default function App() {
       const baselineRaw = findValue(row, [
         'baseline', 'baselinegrade', 'baseline grade', 'target', 'targetgrade', 'predicted', 
         'end of ks2', 'ks2', 'ks3', 'cats', 'midyis', 'yellis', 'working towards', 'expectation', 
-        defaultSubject, 'Comp Sci', 'CS', 'ICT'
+        defaultSubject, 'Comp Sci', 'CS', 'ICT', 'Computer Science'
       ]);
       const baselineGrade = baselineRaw ? String(baselineRaw).trim().toUpperCase() : undefined;
 
       // Ensure student exists
       let student = newStudents.find(s => {
-        const sName = s.name.trim().toLowerCase();
-        const rName = studentName.toLowerCase();
+        const normalize = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+        const sName = normalize(s.name);
+        const rName = normalize(studentName);
         
         let isNameMatch = false;
         if (sName === rName) {
           isNameMatch = true;
         } else {
-          const parts = rName.split(' ');
+          const parts = studentName.toLowerCase().split(/\s+/).filter(p => p.length > 1);
           if (parts.length >= 2) {
-            const flipped1 = `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(' ')}`.toLowerCase();
-            const flipped2 = `${parts.slice(0, -1).join(' ')}, ${parts[parts.length - 1]}`.toLowerCase();
-            if (sName === flipped1 || sName === flipped2) {
+            const first = normalize(parts[0]);
+            const last = normalize(parts[parts.length - 1]);
+            // Check if both first and last name chunks are present in the stored name
+            if (sName.includes(first) && sName.includes(last)) {
               isNameMatch = true;
             }
           }
         }
         
+        // Match year group strictly. 
+        // If we find a name match in the SAME year group but DIFFERENT groupName, 
+        // we'll consider it a match to avoid duplicates across sets.
         return isNameMatch && s.yearGroup === effectiveYearGroup && s.academicYear === selectedAcademicYear;
       });
       if (!student) {
@@ -6125,6 +6197,40 @@ export default function App() {
                           {header}
                         </span>
                       ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-8 border-t border-slate-100">
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="p-2 bg-indigo-50 rounded-lg">
+                        <Database className="w-5 h-5 text-indigo-600" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-800">Advanced Data Management</h3>
+                        <p className="text-xs text-slate-500">Utilities for maintaining system-wide data integrity</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-4 bg-slate-50/50 rounded-xl border border-slate-100 group">
+                        <div>
+                          <p className="text-sm font-bold text-slate-700">Cleanup Duplicate Student Records</p>
+                          <p className="text-[11px] text-slate-500 leading-relaxed max-w-lg">
+                            Scans for students with the same name across different groups in the same Year Group. 
+                            It will merge their baseline grades and move all mark history into a single cohesive record.
+                          </p>
+                        </div>
+                        <button 
+                          onClick={consolidateStudents}
+                          disabled={saveStatus === 'saving'}
+                          className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/30 transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${saveStatus === 'saving' ? 'animate-spin' : ''}`} />
+                          Merge Duplicates
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
